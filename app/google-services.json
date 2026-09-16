@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "288208030273",
+    "project_id": "phronesis-mobile",
+    "storage_bucket": "phronesis-mobile.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:288208030273:android:538e527458d6fb2a3154c0",
+        "android_client_info": {
+          "package_name": "com.phronesis.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB2GykjkXi3tm4viz-62nVLF_TFhNA44RM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
