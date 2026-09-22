@@ -33,12 +33,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Quiz
-import androidx.compose.material.icons.filled.Assignment
+import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.MenuBook
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Quiz
+import androidx.compose.material.icons.outlined.Assignment
+import com.phronesis.mobile.BuildConfig
 
 object Routes {
     const val DASHBOARD = "Dashboard"
@@ -67,9 +68,10 @@ class MainActivity : ComponentActivity() {
             DebugAppCheckProviderFactory.getInstance()
         )
 
-        Purchases.logLevel = LogLevel.DEBUG
-        Purchases.configure(PurchasesConfiguration.Builder(this, "test_ENqGSljZcZxGVssHerDUCMWJUhZ").build())
-
+        if (BuildConfig.DEBUG) {
+            Purchases.logLevel = LogLevel.DEBUG
+            Purchases.configure(PurchasesConfiguration.Builder(this, "test_ENqGSljZcZxGVssHerDUCMWJUhZ").build())
+        }
         setContent {
             PhronesisTheme {
                 PhronesisApp()
@@ -98,7 +100,7 @@ fun PhronesisApp() {
                 actions = {
                     if (pageOrder[pagerState.currentPage] == Routes.DASHBOARD) {
                         IconButton(onClick = { showProfileDialog = true }) {
-                            Icon(Icons.Filled.AccountCircle, contentDescription = "Profile")
+                            Icon(Icons.Outlined.AccountCircle, contentDescription = "Profile")
                         }
                     }
                 },
@@ -148,12 +150,12 @@ private fun labelFor(route: String): String = when (route) {
 }
 
 private fun iconFor(route: String) = when (route) {
-    Routes.DASHBOARD -> Icons.Filled.Home
-    Routes.SCHEDULE -> Icons.Filled.CalendarMonth
-    Routes.UNITS -> Icons.Filled.MenuBook
-    Routes.QUIZ -> Icons.Filled.Quiz
-    Routes.CONTROL_PANEL -> Icons.Filled.Assignment
-    else -> Icons.Filled.Home
+    Routes.DASHBOARD -> Icons.Outlined.Home
+    Routes.SCHEDULE -> Icons.Outlined.CalendarMonth
+    Routes.UNITS -> Icons.Outlined.MenuBook
+    Routes.QUIZ -> Icons.Outlined.Quiz
+    Routes.CONTROL_PANEL -> Icons.Outlined.Assignment
+    else -> Icons.Outlined.Home
 }
 
 @Composable

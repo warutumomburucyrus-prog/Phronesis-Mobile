@@ -16,6 +16,8 @@ import androidx.compose.ui.unit.dp
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 @Entity(tableName = "assignments")
 data class Assignment(
@@ -87,7 +89,7 @@ private fun AssignmentBubble(assignment: Assignment, onToggleComplete: () -> Uni
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         color = Terracotta.copy(alpha = 0.75f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
+        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.4f))
     ) {
         Box(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -139,7 +141,24 @@ private fun AddAssignmentDialog(onDismiss: () -> Unit, onSave: (Assignment) -> U
                 OutlinedTextField(value = courseCode, onValueChange = { courseCode = it }, label = { Text("Course code") })
                 OutlinedTextField(value = topic, onValueChange = { topic = it }, label = { Text("Topic") })
                 OutlinedTextField(value = mode, onValueChange = { mode = it }, label = { Text("Mode of submission") })
-                OutlinedTextField(value = deadline, onValueChange = { deadline = it }, label = { Text("Deadline") })
+                val calendarContext = LocalContext.current
+                OutlinedTextField(
+                    value = deadline,
+                    onValueChange = {},
+                    label = { Text("Deadline") },
+                    readOnly = true,
+                    modifier = Modifier.clickable {
+                        val today = LocalDate.now()
+                        android.app.DatePickerDialog(
+                            calendarContext,
+                            { _, year, month, day ->
+                                deadline = LocalDate.of(year, month + 1, day)
+                                    .format(DateTimeFormatter.ofPattern("dd MMM yyyy"))
+                            },
+                            today.year, today.monthValue - 1, today.dayOfMonth
+                        ).show()
+                    }
+                )
             }
         },
         confirmButton = {

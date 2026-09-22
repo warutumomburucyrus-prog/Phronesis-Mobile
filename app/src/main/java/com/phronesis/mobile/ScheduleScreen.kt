@@ -108,7 +108,7 @@ fun ScheduleScreen() {
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
                     color = Amber.copy(alpha = 0.75f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
+                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.4f))
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(day, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)

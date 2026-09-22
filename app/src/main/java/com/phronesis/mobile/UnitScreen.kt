@@ -38,12 +38,15 @@ fun UnitsScreen() {
                     modifier = Modifier.fillMaxWidth().clickable { editingUnit = unit },
                     shape = RoundedCornerShape(16.dp),
                     color = Clay.copy(alpha = 0.75f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
+                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.4f))
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Text(unit.code, color = Color.White, style = MaterialTheme.typography.titleMedium)
                         if (unit.name.isNotBlank()) {
                             Text(unit.name, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
+                        }
+                        if (unit.topics.isNotBlank()) {
+                            Text(unit.topics, color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -93,6 +96,49 @@ fun UnitsScreen() {
                 }
             }
             fillNamesError?.let {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        val hasUnitsWithoutTopics = units.any { it.name.isNotBlank() && it.topics.isBlank() }
+        var isFillingTopics by remember { mutableStateOf(false) }
+        var fillTopicsError by remember { mutableStateOf<String?>(null) }
+
+        if (hasUnitsWithoutTopics) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth().clickable {
+                    val program = UserPrefs.getProgram(context)
+                    if (!program.isNullOrBlank()) {
+                        isFillingTopics = true
+                        fillTopicsError = null
+                        coroutineScope.launch {
+                            try {
+                                val university = UserPrefs.getUniversity(context) ?: ""
+                                val targets = units.filter { it.name.isNotBlank() && it.topics.isBlank() }
+                                targets.forEach { unit ->
+                                    val topicsJson = GeminiHelper.identifyUnitTopics(university, program, unit.code, unit.name)
+                                    val topics = parseUnitTopicsJson(topicsJson)
+                                    db.unitDao().update(unit.copy(topics = topics.joinToString(", ")))
+                                }
+                            } catch (e: Exception) {
+                                fillTopicsError = e.message ?: "Couldn't fetch topics right now."
+                            } finally {
+                                isFillingTopics = false
+                            }
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(16.dp),
+                color = Clay.copy(alpha = 0.75f),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
+            ) {
+                Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(if (isFillingTopics) "Fetching topics..." else "Fill in topics", color = Color.White, style = MaterialTheme.typography.titleSmall)
+                }
+            }
+            fillTopicsError?.let {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }

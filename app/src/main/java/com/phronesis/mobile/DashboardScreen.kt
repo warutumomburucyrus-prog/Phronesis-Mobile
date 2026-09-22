@@ -68,7 +68,10 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
 
     val unitsText = remember(units) {
         if (units.isEmpty()) "No units yet — import your timetable"
-        else units.joinToString("\n") { if (it.name.isNotBlank()) "${it.code} — ${it.name}" else it.code }
+        else units.joinToString("\n\n") {
+            val header = if (it.name.isNotBlank()) "${it.code} — ${it.name}" else it.code
+            if (it.topics.isNotBlank()) "$header\n${it.topics}" else header
+        }
     }
 
     if (showNameDialog) {
@@ -145,7 +148,7 @@ private fun Bubble(
         modifier = modifier
             .aspectRatio(1f)
             .background(color.copy(alpha = 0.75f), RoundedCornerShape(20.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+            .border(0.5.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
             .padding(12.dp)
     ) {

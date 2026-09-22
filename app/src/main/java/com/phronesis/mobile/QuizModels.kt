@@ -59,3 +59,10 @@ fun parseUnitNamesJson(raw: String): List<UnitNameData> {
         UnitNameData(code = obj.getString("code"), name = obj.getString("name"))
     }
 }
+
+fun parseUnitTopicsJson(raw: String): List<String> {
+    val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+    val obj = org.json.JSONObject(cleaned)
+    val arr = obj.getJSONArray("topics")
+    return (0 until arr.length()).map { arr.getString(it) }
+}

@@ -93,6 +93,18 @@ object GeminiHelper {
         model.generateContent(prompt).text ?: "[]"
     }
 
+    suspend fun identifyUnitTopics(university: String, program: String, code: String, unitName: String): String = withTokenRetry {
+        val prompt = """
+        At $university, in the program "$program", list the main topics typically covered
+        in the course "$code — $unitName".
+        Use your knowledge of this specific university's curriculum if you have it. If you
+        don't have specific knowledge, give a reasonable general breakdown based on the course title.
+        Output ONLY valid JSON, no markdown, no code fences, in exactly this shape:
+        {"topics":["Topic one","Topic two","Topic three"]}
+    """.trimIndent()
+        model.generateContent(prompt).text ?: """{"topics":[]}"""
+    }
+
     suspend fun parseTimetablePdf(context: Context, uri: Uri, program: String): String = withTokenRetry {
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: throw IllegalStateException("Couldn't read the timetable PDF.")
