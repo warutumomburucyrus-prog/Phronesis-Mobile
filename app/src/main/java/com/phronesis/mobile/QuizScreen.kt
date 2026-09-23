@@ -88,6 +88,7 @@ fun QuizScreen() {
     val notes by db.noteDao().getAll().collectAsState(initial = emptyList())
     var selectedNoteId by remember { mutableStateOf<Long?>(null) }
     val selectedNote = notes.find { it.id == selectedNoteId }
+    val units by db.unitDao().getAll().collectAsState(initial = emptyList())
 
     var showGenerateDialog by remember { mutableStateOf(false) }
     var focusInput by remember { mutableStateOf("") }
@@ -99,6 +100,8 @@ fun QuizScreen() {
     var quizError by remember { mutableStateOf<String?>(null) }
     var quizTitle by remember { mutableStateOf("Quiz") }
     var showQuizView by remember { mutableStateOf(false) }
+    var quizUnitCode by remember { mutableStateOf<String?>(null) }
+    var quizTopic by remember { mutableStateOf<String?>(null) }
 
     var isSummarizing by remember { mutableStateOf(false) }
     var summaryText by remember { mutableStateOf<String?>(null) }
@@ -150,7 +153,7 @@ fun QuizScreen() {
                     quizTitle = "Quiz"
                 })
             }
-            QuizPlayer(questions = generatedQuiz ?: emptyList())
+            QuizPlayer(questions = generatedQuiz ?: emptyList(), unitCode = quizUnitCode, topic = quizTopic, db = db, coroutineScope = coroutineScope)
         }
         return
     }
@@ -388,21 +391,35 @@ fun QuizScreen() {
     if (showGenerateDialog) {
         GenerateQuizDialog(
             hasSelectedNote = selectedNote != null,
+            units = units,
             onDismiss = { showGenerateDialog = false },
-            onGenerate = { questionCount, unitName ->
+            onGenerate = { questionCount, unitCode, topic ->
                 showGenerateDialog = false
                 isGenerating = true
                 quizError = null
-                quizTitle = deriveQuizTitle(focusInput, unitName)
+                val unitName = units.find { it.code == unitCode }?.name
+                quizUnitCode = unitCode
+                quizTopic = topic
+                quizTitle = deriveQuizTitle(topic ?: focusInput, unitName)
                 coroutineScope.launch {
                     try {
+                        val topicOrFocus = topic ?: focusInput
                         val rawJson = if (selectedNote != null) {
-                            GeminiHelper.generateQuizFromPdf(selectedNote.filePath, questionCount, focusInput)
+                            GeminiHelper.generateQuizFromPdf(selectedNote.filePath, questionCount, topicOrFocus)
                         } else {
-                            GeminiHelper.generateQuizFromText(unitName ?: "General study material", questionCount, focusInput)
+                            GeminiHelper.generateQuizFromText(unitName ?: "General study material", questionCount, topicOrFocus)
                         }
                         generatedQuiz = parseQuizJson(rawJson)
                         showQuizView = true
+                        if (unitCode != null && topic != null) {
+                            val existing = db.topicProgressDao().getOne(unitCode, topic)
+                            val bumped = (existing?.familiarity ?: 0) + 15
+                            if (existing != null) {
+                                db.topicProgressDao().update(existing.copy(familiarity = bumped.coerceAtMost(100)))
+                            } else {
+                                db.topicProgressDao().insert(TopicProgressEntity(unitCode = unitCode, topic = topic, familiarity = 15))
+                            }
+                        }
                     } catch (e: Exception) {
                         quizError = e.stackTraceToString().take(400)
                     } finally {
@@ -437,11 +454,13 @@ fun QuizScreen() {
 @Composable
 private fun GenerateQuizDialog(
     hasSelectedNote: Boolean,
+    units: List<UnitEntity>,
     onDismiss: () -> Unit,
-    onGenerate: (questionCount: Int, unitName: String?) -> Unit
+    onGenerate: (questionCount: Int, unitCode: String?, topic: String?) -> Unit
 ) {
     var questionCount by remember { mutableStateOf(5) }
-    var selectedUnit by remember { mutableStateOf<String?>(null) }
+    var selectedUnit by remember { mutableStateOf<UnitEntity?>(null) }
+    var selectedTopic by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -456,22 +475,50 @@ private fun GenerateQuizDialog(
                 if (!hasSelectedNote) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("No note selected — choose a unit instead:")
-                    sampleUnitNames.forEach { unit ->
+                    units.forEach { unit ->
                         Surface(
-                            modifier = Modifier.fillMaxWidth().clickable { selectedUnit = unit },
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                selectedUnit = unit
+                                selectedTopic = null
+                            },
                             shape = RoundedCornerShape(10.dp),
-                            color = if (selectedUnit == unit) Clay.copy(alpha = 0.8f) else Clay.copy(alpha = 0.3f),
+                            color = if (selectedUnit?.id == unit.id) Clay.copy(alpha = 0.8f) else Clay.copy(alpha = 0.3f),
                             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f))
                         ) {
-                            Text(unit, modifier = Modifier.padding(10.dp))
+                            Text(
+                                if (unit.name.isNotBlank()) "${unit.code} — ${unit.name}" else unit.code,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+                    val topicsForUnit = selectedUnit?.topics
+                        ?.split(",")
+                        ?.map { it.trim() }
+                        ?.filter { it.isNotBlank() }
+                        ?: emptyList()
+                    if (topicsForUnit.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Which topic?")
+                        topicsForUnit.forEach { topic ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().clickable { selectedTopic = topic },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (selectedTopic == topic) Terracotta.copy(alpha = 0.8f) else Terracotta.copy(alpha = 0.3f),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f))
+                            ) {
+                                Text(topic, modifier = Modifier.padding(10.dp))
+                            }
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            val canGenerate = hasSelectedNote || selectedUnit != null
-            TextButton(onClick = { onGenerate(questionCount, selectedUnit) }, enabled = canGenerate) {
+            val canGenerate = hasSelectedNote || (selectedUnit != null && (selectedUnit?.topics?.isBlank() != false || selectedTopic != null))
+            TextButton(
+                onClick = { onGenerate(questionCount, selectedUnit?.code, selectedTopic) },
+                enabled = canGenerate
+            ) {
                 Text("Generate")
             }
         },
@@ -492,13 +539,36 @@ private fun StepperButton(symbol: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun QuizPlayer(questions: List<QuizQuestion>) {
+private fun QuizPlayer(
+    questions: List<QuizQuestion>,
+    unitCode: String? = null,
+    topic: String? = null,
+    db: AppDatabase? = null,
+    coroutineScope: kotlinx.coroutines.CoroutineScope? = null
+) {
     var index by remember { mutableStateOf(0) }
     var selected by remember(index) { mutableStateOf<Int?>(null) }
     var score by remember { mutableStateOf(0) }
     var finished by remember { mutableStateOf(false) }
+    var hasSavedResult by remember { mutableStateOf(false) }
 
     if (finished) {
+        if (!hasSavedResult && unitCode != null && topic != null && db != null && coroutineScope != null) {
+            hasSavedResult = true
+            val percentThisAttempt = (score * 100) / questions.size
+            coroutineScope.launch {
+                val existing = db.topicProgressDao().getOne(unitCode, topic)
+                if (existing != null) {
+                    val newCount = existing.quizzesTaken + 1
+                    val newMastery = ((existing.mastery * existing.quizzesTaken) + percentThisAttempt) / newCount
+                    db.topicProgressDao().update(existing.copy(mastery = newMastery, quizzesTaken = newCount))
+                } else {
+                    db.topicProgressDao().insert(
+                        TopicProgressEntity(unitCode = unitCode, topic = topic, mastery = percentThisAttempt, quizzesTaken = 1)
+                    )
+                }
+            }
+        }
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

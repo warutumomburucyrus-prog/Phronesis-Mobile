@@ -5,12 +5,13 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [Assignment::class, NoteEntity::class, ClassSessionEntity::class, UnitEntity::class], version = 4, exportSchema = false)
+@Database(entities = [Assignment::class, NoteEntity::class, ClassSessionEntity::class, UnitEntity::class, TopicProgressEntity::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun assignmentDao(): AssignmentDao
     abstract fun noteDao(): NoteDao
     abstract fun classSessionDao(): ClassSessionDao
     abstract fun unitDao(): UnitDao
+    abstract fun topicProgressDao(): TopicProgressDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

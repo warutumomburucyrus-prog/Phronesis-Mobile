@@ -21,6 +21,8 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 @Composable
 fun DashboardScreen(onBubbleClick: (String) -> Unit) {
@@ -28,10 +30,13 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
     val db = remember { AppDatabase.getInstance(context) }
     var userName by remember { mutableStateOf(UserPrefs.getName(context)) }
     var showNameDialog by remember { mutableStateOf(userName == null) }
+    var showFamiliarityPopup by remember { mutableStateOf(false) }
+    var showMasteryPopup by remember { mutableStateOf(false) }
 
     val sessions by db.classSessionDao().getAll().collectAsState(initial = emptyList())
     val units by db.unitDao().getAll().collectAsState(initial = emptyList())
     val assignments by db.assignmentDao().getAll().collectAsState(initial = emptyList())
+    val topicProgress by db.topicProgressDao().getAll().collectAsState(initial = emptyList())
 
     val todaysClassesText = remember(sessions, units) {
         val todayName = LocalDate.now().dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
@@ -129,10 +134,36 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
                 Bubble("Assignments", Terracotta, assignmentsText, Modifier.weight(1f)) { onBubbleClick(Routes.CONTROL_PANEL) }
             }
             Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Bubble("Units Progress", Clay, unitsText, Modifier.weight(1f)) { onBubbleClick(Routes.UNITS) }
-                Bubble("Performance", Color(0xFFD98324), "No quiz results yet", Modifier.weight(1f)) { onBubbleClick(Routes.QUIZ) }
+                Bubble("Units Progress", Clay, unitsText, Modifier.weight(1f)) { showFamiliarityPopup = true }
+                Bubble("Performance", Color(0xFFD98324), "No quiz results yet", Modifier.weight(1f)) { showMasteryPopup = true }
             }
         }
+    }
+
+    if (showFamiliarityPopup) {
+        val familiarityItems = topicProgress.map { it ->
+            val unit = units.find { u -> u.code == it.unitCode }
+            val label = if (unit != null) "${it.unitCode} — ${it.topic}" else "${it.unitCode}: ${it.topic}"
+            label to it.familiarity
+        }
+        ProgressPopup(
+            title = "Familiarity by topic",
+            ringColor = Clay,
+            items = familiarityItems,
+            onDismiss = { showFamiliarityPopup = false }
+        )
+    }
+
+    if (showMasteryPopup) {
+        val masteryItems = topicProgress
+            .filter { it.quizzesTaken > 0 }
+            .map { "${it.unitCode} — ${it.topic}" to it.mastery }
+        ProgressPopup(
+            title = "Mastery by topic",
+            ringColor = Color(0xFFD98324),
+            items = masteryItems,
+            onDismiss = { showMasteryPopup = false }
+        )
     }
 }
 
@@ -167,4 +198,54 @@ private fun Bubble(
             }
         }
     }
+}
+
+@Composable
+private fun TopicProgressRow(label: String, percent: Int, ringColor: Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                progress = { percent / 100f },
+                modifier = Modifier.fillMaxSize(),
+                color = ringColor,
+                trackColor = ringColor.copy(alpha = 0.2f),
+                strokeWidth = 5.dp
+            )
+            Text("$percent%", style = MaterialTheme.typography.labelSmall)
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun ProgressPopup(
+    title: String,
+    ringColor: Color,
+    items: List<Pair<String, Int>>,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            if (items.isEmpty()) {
+                Text("No topics yet — fetch topics for a unit first.")
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(rememberScrollState())
+                ) {
+                    items.forEach { (label, percent) ->
+                        TopicProgressRow(label = label, percent = percent, ringColor = ringColor)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
 }

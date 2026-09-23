@@ -121,6 +121,12 @@ fun UnitsScreen() {
                                     val topicsJson = GeminiHelper.identifyUnitTopics(university, program, unit.code, unit.name)
                                     val topics = parseUnitTopicsJson(topicsJson)
                                     db.unitDao().update(unit.copy(topics = topics.joinToString(", ")))
+                                    topics.forEach { topic ->
+                                        val existing = db.topicProgressDao().getOne(unit.code, topic)
+                                        if (existing == null) {
+                                            db.topicProgressDao().insert(TopicProgressEntity(unitCode = unit.code, topic = topic))
+                                        }
+                                    }
                                 }
                             } catch (e: Exception) {
                                 fillTopicsError = e.message ?: "Couldn't fetch topics right now."
