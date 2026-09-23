@@ -24,6 +24,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import java.io.File
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 private val sampleUnitNames = listOf("Calculus II (MATH201)", "Data Structures (CS301)", "Physics I (PHY110)")
 
@@ -97,6 +99,11 @@ fun QuizScreen() {
 
     var isGenerating by remember { mutableStateOf(false) }
     var generatedQuiz by remember { mutableStateOf<List<QuizQuestion>?>(null) }
+    var quizCurrentIndex by remember { mutableStateOf(0) }
+    var quizAnswers by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) } // question index -> confirmed option index
+    var quizFinished by remember { mutableStateOf(false) }
+    var quizTimerTotalSeconds by remember { mutableStateOf<Int?>(null) }
+    var quizTimerRemainingSeconds by remember { mutableStateOf<Int?>(null) }
     var quizError by remember { mutableStateOf<String?>(null) }
     var quizTitle by remember { mutableStateOf("Quiz") }
     var showQuizView by remember { mutableStateOf(false) }
@@ -153,7 +160,22 @@ fun QuizScreen() {
                     quizTitle = "Quiz"
                 })
             }
-            QuizPlayer(questions = generatedQuiz ?: emptyList(), unitCode = quizUnitCode, topic = quizTopic, db = db, coroutineScope = coroutineScope)
+            QuizPlayer(
+                questions = generatedQuiz ?: emptyList(),
+                currentIndex = quizCurrentIndex,
+                onIndexChange = { quizCurrentIndex = it },
+                answers = quizAnswers,
+                onAnswerConfirmed = { qIdx, optIdx -> quizAnswers = quizAnswers + (qIdx to optIdx) },
+                finished = quizFinished,
+                onFinishedChange = { quizFinished = it },
+                timerTotalSeconds = quizTimerTotalSeconds,
+                timerRemainingSeconds = quizTimerRemainingSeconds,
+                onTimerTick = { quizTimerRemainingSeconds = it },
+                unitCode = quizUnitCode,
+                topic = quizTopic,
+                db = db,
+                coroutineScope = coroutineScope
+            )
         }
         return
     }
@@ -393,10 +415,15 @@ fun QuizScreen() {
             hasSelectedNote = selectedNote != null,
             units = units,
             onDismiss = { showGenerateDialog = false },
-            onGenerate = { questionCount, unitCode, topic ->
+            onGenerate = { questionCount, unitCode, topic, timerMinutes ->
                 showGenerateDialog = false
                 isGenerating = true
                 quizError = null
+                quizCurrentIndex = 0
+                quizAnswers = emptyMap()
+                quizFinished = false
+                quizTimerTotalSeconds = timerMinutes?.times(60)
+                quizTimerRemainingSeconds = timerMinutes?.times(60)
                 val unitName = units.find { it.code == unitCode }?.name
                 quizUnitCode = unitCode
                 quizTopic = topic
@@ -456,22 +483,42 @@ private fun GenerateQuizDialog(
     hasSelectedNote: Boolean,
     units: List<UnitEntity>,
     onDismiss: () -> Unit,
-    onGenerate: (questionCount: Int, unitCode: String?, topic: String?) -> Unit
+    onGenerate: (questionCount: Int, unitCode: String?, topic: String?, timerMinutes: Int?) -> Unit
 ) {
     var questionCount by remember { mutableStateOf(5) }
     var selectedUnit by remember { mutableStateOf<UnitEntity?>(null) }
     var selectedTopic by remember { mutableStateOf<String?>(null) }
+    var timerEnabled by remember { mutableStateOf(false) }
+    var timerMinutes by remember { mutableStateOf(10) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Generate quiz") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text("Number of questions: $questionCount")
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     StepperButton("−") { if (questionCount > 1) questionCount-- }
                     StepperButton("+") { if (questionCount < 20) questionCount++ }
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = timerEnabled, onCheckedChange = { timerEnabled = it })
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Timed quiz")
+                }
+                if (timerEnabled) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Minutes: $timerMinutes")
+                        StepperButton("−") { if (timerMinutes > 1) timerMinutes-- }
+                        StepperButton("+") { if (timerMinutes < 120) timerMinutes++ }
+                    }
+                }
+
                 if (!hasSelectedNote) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("No note selected — choose a unit instead:")
@@ -516,7 +563,7 @@ private fun GenerateQuizDialog(
         confirmButton = {
             val canGenerate = hasSelectedNote || (selectedUnit != null && (selectedUnit?.topics?.isBlank() != false || selectedTopic != null))
             TextButton(
-                onClick = { onGenerate(questionCount, selectedUnit?.code, selectedTopic) },
+                onClick = { onGenerate(questionCount, selectedUnit?.code, selectedTopic, if (timerEnabled) timerMinutes else null) },
                 enabled = canGenerate
             ) {
                 Text("Generate")
@@ -541,18 +588,36 @@ private fun StepperButton(symbol: String, onClick: () -> Unit) {
 @Composable
 private fun QuizPlayer(
     questions: List<QuizQuestion>,
+    currentIndex: Int,
+    onIndexChange: (Int) -> Unit,
+    answers: Map<Int, Int>,
+    onAnswerConfirmed: (Int, Int) -> Unit,
+    finished: Boolean,
+    onFinishedChange: (Boolean) -> Unit,
+    timerTotalSeconds: Int?,
+    timerRemainingSeconds: Int?,
+    onTimerTick: (Int) -> Unit,
     unitCode: String? = null,
     topic: String? = null,
     db: AppDatabase? = null,
     coroutineScope: kotlinx.coroutines.CoroutineScope? = null
 ) {
-    var index by remember { mutableStateOf(0) }
-    var selected by remember(index) { mutableStateOf<Int?>(null) }
-    var score by remember { mutableStateOf(0) }
-    var finished by remember { mutableStateOf(false) }
     var hasSavedResult by remember { mutableStateOf(false) }
 
+    LaunchedEffect(timerTotalSeconds, finished) {
+        if (timerTotalSeconds != null && !finished) {
+            var remaining = timerRemainingSeconds ?: timerTotalSeconds
+            while (remaining > 0 && !finished) {
+                kotlinx.coroutines.delay(1000)
+                remaining--
+                onTimerTick(remaining)
+            }
+            if (remaining <= 0) onFinishedChange(true)
+        }
+    }
+
     if (finished) {
+        val score = answers.count { (qIdx, optIdx) -> questions.getOrNull(qIdx)?.correctIndex == optIdx }
         if (!hasSavedResult && unitCode != null && topic != null && db != null && coroutineScope != null) {
             hasSavedResult = true
             val percentThisAttempt = (score * 100) / questions.size
@@ -579,49 +644,102 @@ private fun QuizPlayer(
         return
     }
 
-    val q = questions[index]
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Text("Question ${index + 1} of ${questions.size}", style = MaterialTheme.typography.labelLarge)
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(q.question, style = MaterialTheme.typography.titleMedium)
-        Spacer(modifier = Modifier.height(16.dp))
+    val q = questions[currentIndex]
+    val alreadyConfirmed = answers.containsKey(currentIndex)
+    var pendingSelection by remember(currentIndex) { mutableStateOf(answers[currentIndex]) }
 
-        q.options.forEachIndexed { optIndex, option ->
-            val isCorrectOption = optIndex == q.correctIndex
-            val isPicked = selected == optIndex
-            val bgColor = when {
-                selected == null -> Clay.copy(alpha = 0.4f)
-                isCorrectOption -> Color(0xFF4CAF50).copy(alpha = 0.7f)
-                isPicked -> Color(0xFFE57373).copy(alpha = 0.7f)
-                else -> Clay.copy(alpha = 0.25f)
-            }
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable(enabled = selected == null) {
-                    selected = optIndex
-                    if (isCorrectOption) score++
-                },
-                shape = RoundedCornerShape(12.dp),
-                color = bgColor
-            ) {
-                Text(option, modifier = Modifier.padding(12.dp))
-            }
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (timerRemainingSeconds != null) {
+            val minutes = timerRemainingSeconds / 60
+            val seconds = timerRemainingSeconds % 60
+            Text(
+                "⏱ %d:%02d".format(minutes, seconds),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = if (timerRemainingSeconds < 30) MaterialTheme.colorScheme.error else Color.Unspecified
+            )
         }
 
-        if (selected != null) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Surface(shape = RoundedCornerShape(12.dp), color = Clay.copy(alpha = 0.3f)) {
-                Text(q.explanation, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+        ) {
+            Text("Question ${currentIndex + 1} of ${questions.size}", style = MaterialTheme.typography.labelLarge)
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(q.question, style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            q.options.forEachIndexed { optIndex, option ->
+                val isCorrectOption = optIndex == q.correctIndex
+                val isPicked = pendingSelection == optIndex
+                val bgColor = when {
+                    !alreadyConfirmed -> if (isPicked) Clay.copy(alpha = 0.7f) else Clay.copy(alpha = 0.3f)
+                    isCorrectOption -> Color(0xFF4CAF50).copy(alpha = 0.7f)
+                    isPicked -> Color(0xFFE57373).copy(alpha = 0.7f)
+                    else -> Clay.copy(alpha = 0.25f)
+                }
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable(enabled = !alreadyConfirmed) {
+                        pendingSelection = optIndex
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = bgColor
+                ) {
+                    Text(option, modifier = Modifier.padding(12.dp))
+                }
+            }
+
+            if (alreadyConfirmed) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(shape = RoundedCornerShape(12.dp), color = Clay.copy(alpha = 0.3f)) {
+                    Text(q.explanation, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                }
             }
             Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
             Surface(
-                modifier = Modifier.fillMaxWidth().clickable {
-                    if (index < questions.size - 1) index++ else finished = true
-                },
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(enabled = currentIndex > 0) { onIndexChange(currentIndex - 1) },
                 shape = RoundedCornerShape(16.dp),
-                color = Terracotta.copy(alpha = 0.75f)
+                color = if (currentIndex > 0) Clay.copy(alpha = 0.6f) else Clay.copy(alpha = 0.2f)
             ) {
                 Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(if (index < questions.size - 1) "Next" else "Finish", color = Color.White)
+                    Text("Previous", color = Color.White)
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Surface(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(enabled = alreadyConfirmed || pendingSelection != null) {
+                        if (!alreadyConfirmed) {
+                            onAnswerConfirmed(currentIndex, pendingSelection!!)
+                        } else if (currentIndex < questions.size - 1) {
+                            onIndexChange(currentIndex + 1)
+                        } else {
+                            onFinishedChange(true)
+                        }
+                    },
+                shape = RoundedCornerShape(16.dp),
+                color = Terracotta.copy(alpha = if (alreadyConfirmed || pendingSelection != null) 0.75f else 0.3f)
+            ) {
+                Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        when {
+                            !alreadyConfirmed -> "Confirm"
+                            currentIndex < questions.size - 1 -> "Next"
+                            else -> "Finish"
+                        },
+                        color = Color.White
+                    )
                 }
             }
         }

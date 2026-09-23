@@ -17,7 +17,7 @@
             android:exported="true"
             android:label="Phronesis"
             android:theme="@style/Theme.Phronesis"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustPan">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
