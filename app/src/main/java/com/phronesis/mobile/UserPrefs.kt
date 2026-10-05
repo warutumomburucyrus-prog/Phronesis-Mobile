@@ -37,4 +37,14 @@ object UserPrefs {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_UNIVERSITY, university).apply()
     }
+
+    fun getFocusModeDefault(context: Context): Boolean {
+        val prefs = context.getSharedPreferences("phronesis_prefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("focus_mode_default", false)
+    }
+
+    fun setFocusModeDefault(context: Context, enabled: Boolean) {
+        val prefs = context.getSharedPreferences("phronesis_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("focus_mode_default", enabled).apply()
+    }
 }

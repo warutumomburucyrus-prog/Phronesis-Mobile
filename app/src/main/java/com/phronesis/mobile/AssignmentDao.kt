@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
+import androidx.room.Delete
 
 @Dao
 interface AssignmentDao {
@@ -17,4 +18,7 @@ interface AssignmentDao {
 
     @Update
     suspend fun update(assignment: Assignment)
+
+    @Delete
+    suspend fun delete(assignment: Assignment)
 }

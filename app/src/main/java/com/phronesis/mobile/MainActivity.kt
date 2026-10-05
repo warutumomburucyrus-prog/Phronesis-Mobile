@@ -8,8 +8,11 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import kotlinx.coroutines.launch
@@ -40,6 +43,7 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Quiz
 import androidx.compose.material.icons.outlined.Assignment
 import com.phronesis.mobile.BuildConfig
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
 object Routes {
     const val DASHBOARD = "Dashboard"
@@ -56,13 +60,10 @@ class MainActivity : ComponentActivity() {
     lateinit var paywallLauncher: PaywallActivityLauncher
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
 
-        paywallLauncher = PaywallActivityLauncher(this, object : PaywallResultHandler {
-            override fun onActivityResult(result: PaywallResult) {
-                // After the paywall closes, QuizScreen will re-check access automatically.
-            }
-        })
+        installSplashScreen()
+
+        super.onCreate(savedInstanceState)
 
         FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
             DebugAppCheckProviderFactory.getInstance()
@@ -70,11 +71,30 @@ class MainActivity : ComponentActivity() {
 
         if (BuildConfig.DEBUG) {
             Purchases.logLevel = LogLevel.DEBUG
-            Purchases.configure(PurchasesConfiguration.Builder(this, "test_ENqGSljZcZxGVssHerDUCMWJUhZ").build())
+            Purchases.configure(
+                PurchasesConfiguration.Builder(
+                    this,
+                    "test_ENqGSljZcZxGVssHerDUCMWJUhZ"
+                ).build()
+            )
         }
+
+        paywallLauncher = PaywallActivityLauncher(this, object : PaywallResultHandler {
+            override fun onActivityResult(result: PaywallResult) {
+                // After the paywall closes, QuizScreen will re-check access automatically.
+            }
+        })
         setContent {
-            PhronesisTheme {
-                PhronesisApp()
+            val capped = LocalDensity.current.let {
+                Density(
+                    density = it.density,
+                    fontScale = it.fontScale.coerceIn(0.85f, 1.3f)
+                )
+            }
+            CompositionLocalProvider(LocalDensity provides capped) {
+                PhronesisTheme {
+                    PhronesisApp()
+                }
             }
         }
     }
@@ -95,27 +115,31 @@ fun PhronesisApp() {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(labelFor(pageOrder[pagerState.currentPage])) },
-                actions = {
-                    if (pageOrder[pagerState.currentPage] == Routes.DASHBOARD) {
-                        IconButton(onClick = { showProfileDialog = true }) {
-                            Icon(Icons.Outlined.AccountCircle, contentDescription = "Profile")
+            if (!FocusModeState.isActive.value) {
+                TopAppBar(
+                    title = { Text(labelFor(pageOrder[pagerState.currentPage])) },
+                    actions = {
+                        if (pageOrder[pagerState.currentPage] == Routes.DASHBOARD) {
+                            IconButton(onClick = { showProfileDialog = true }) {
+                                Icon(Icons.Outlined.AccountCircle, contentDescription = "Profile")
+                            }
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = WarmSurface)
-            )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = WarmSurface)
+                )
+            }
         },
         bottomBar = {
-            NavigationBar(containerColor = WarmSurface) {
-                pageOrder.forEachIndexed { index, route ->
-                    NavigationBarItem(
-                        selected = pagerState.currentPage == index,
-                        onClick = { goTo(route) },
-                        icon = { Icon(iconFor(route), contentDescription = labelFor(route)) },
-                        label = { Text(labelFor(route)) }
-                    )
+            if (!FocusModeState.isActive.value) {
+                NavigationBar(containerColor = WarmSurface) {
+                    pageOrder.forEachIndexed { index, route ->
+                        NavigationBarItem(
+                            selected = pagerState.currentPage == index,
+                            onClick = { goTo(route) },
+                            icon = { Icon(iconFor(route), contentDescription = labelFor(route)) },
+                            label = { Text(labelFor(route)) }
+                        )
+                    }
                 }
             }
         }

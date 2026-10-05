@@ -1,6 +1,5 @@
 package com.phronesis.mobile
 
-import android.inputmethodservice.Keyboard
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,14 +70,19 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
             pending.take(4).joinToString("\n") { "${it.courseName} — ${it.deadline}" }
     }
 
-    val unitsText = remember(units) {
-        if (units.isEmpty()) "No units yet — import your timetable"
-        else units.joinToString("\n\n") {
-            val header = if (it.name.isNotBlank()) "${it.code} — ${it.name}" else it.code
-            if (it.topics.isNotBlank()) "$header\n${it.topics}" else header
-        }
+    val familiarityPercent = remember(topicProgress) {
+        if (topicProgress.isEmpty()) null else Math.round(topicProgress.map { it.familiarity }.average()).toInt()
     }
+    val familiarityLabel = if (units.isEmpty()) "No units yet" else "across ${units.size} unit${if (units.size == 1) "" else "s"}"
 
+    val masteryPercent = remember(topicProgress) {
+        val quizzed = topicProgress.filter { it.quizzesTaken > 0 }
+        if (quizzed.isEmpty()) null else Math.round(quizzed.map { it.mastery }.average()).toInt()
+    }
+    val masteryLabel = remember(topicProgress) {
+        val quizzed = topicProgress.filter { it.quizzesTaken > 0 }
+        if (quizzed.isEmpty()) "No quiz results yet" else "across ${quizzed.map { it.unitCode }.distinct().size} unit(s)"
+    }
     if (showNameDialog) {
         var nameInput by remember { mutableStateOf("") }
         var programInput by remember { mutableStateOf("") }
@@ -134,34 +138,43 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
                 Bubble("Assignments", Terracotta, assignmentsText, Modifier.weight(1f)) { onBubbleClick(Routes.CONTROL_PANEL) }
             }
             Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Bubble("Units Progress", Clay, unitsText, Modifier.weight(1f)) { showFamiliarityPopup = true }
-                Bubble("Performance", Color(0xFFD98324), "No quiz results yet", Modifier.weight(1f)) { showMasteryPopup = true }
+                Bubble("Units Progress", Clay, familiarityLabel, Modifier.weight(1f), percent = familiarityPercent) { showFamiliarityPopup = true }
+                Bubble("Performance", Color(0xFFD98324), masteryLabel, Modifier.weight(1f), percent = masteryPercent) { showMasteryPopup = true }
             }
         }
     }
 
     if (showFamiliarityPopup) {
-        val familiarityItems = topicProgress.map { it ->
-            val unit = units.find { u -> u.code == it.unitCode }
-            val label = if (unit != null) "${it.unitCode} — ${it.topic}" else "${it.unitCode}: ${it.topic}"
-            label to it.familiarity
-        }
+        val familiarityByUnit = topicProgress
+            .groupBy { it.unitCode }
+            .map { (unitCode, entries) ->
+                val unit = units.find { it.code == unitCode }
+                val label = if (unit != null && unit.name.isNotBlank()) "$unitCode — ${unit.name}" else unitCode
+                val avg = Math.round(entries.map { it.familiarity }.average()).toInt()
+                label to avg
+            }
         ProgressPopup(
-            title = "Familiarity by topic",
+            title = "Familiarity by unit",
             ringColor = Clay,
-            items = familiarityItems,
+            items = familiarityByUnit,
             onDismiss = { showFamiliarityPopup = false }
         )
     }
 
     if (showMasteryPopup) {
-        val masteryItems = topicProgress
+        val masteryByUnit = topicProgress
             .filter { it.quizzesTaken > 0 }
-            .map { "${it.unitCode} — ${it.topic}" to it.mastery }
+            .groupBy { it.unitCode }
+            .map { (unitCode, entries) ->
+                val unit = units.find { it.code == unitCode }
+                val label = if (unit != null && unit.name.isNotBlank()) "$unitCode — ${unit.name}" else unitCode
+                val avg = Math.round(entries.map { it.mastery }.average()).toInt()
+                label to avg
+            }
         ProgressPopup(
-            title = "Mastery by topic",
+            title = "Performance by unit",
             ringColor = Color(0xFFD98324),
-            items = masteryItems,
+            items = masteryByUnit,
             onDismiss = { showMasteryPopup = false }
         )
     }
@@ -173,11 +186,12 @@ private fun Bubble(
     color: Color,
     content: String,
     modifier: Modifier = Modifier,
+    percent: Int? = null,
     onClick: () -> Unit
 ) {
     Box(
         modifier = modifier
-            .aspectRatio(1f)
+            .fillMaxHeight()
             .background(color.copy(alpha = 0.75f), RoundedCornerShape(20.dp))
             .border(0.5.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
@@ -192,9 +206,29 @@ private fun Bubble(
                     .weight(1f)
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color.Black.copy(alpha = 0.14f))
-                    .padding(10.dp)
             ) {
-                Text(content, color = Color.White, style = MaterialTheme.typography.bodySmall)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (percent != null) {
+                        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(
+                                progress = { percent / 100f },
+                                modifier = Modifier.fillMaxSize(),
+                                color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.25f),
+                                strokeWidth = 4.dp
+                            )
+                            Text("$percent%", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                    Text(content, color = Color.White, style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
             }
         }
     }

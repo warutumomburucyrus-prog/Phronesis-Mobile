@@ -1,5 +1,7 @@
 package com.phronesis.mobile
 
+import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.material.icons.outlined.FullscreenExit
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
@@ -26,6 +28,14 @@ import kotlinx.coroutines.launch
 import java.io.File
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material3.IconButton
+import android.app.Activity
+import androidx.compose.runtime.LaunchedEffect
+import com.phronesis.mobile.BuildConfig
 
 private val sampleUnitNames = listOf("Calculus II (MATH201)", "Data Structures (CS301)", "Physics I (PHY110)")
 
@@ -107,6 +117,7 @@ fun QuizScreen() {
     var quizError by remember { mutableStateOf<String?>(null) }
     var quizTitle by remember { mutableStateOf("Quiz") }
     var showQuizView by remember { mutableStateOf(false) }
+    var isFocusMode by remember { mutableStateOf(UserPrefs.getFocusModeDefault(context)) }
     var quizUnitCode by remember { mutableStateOf<String?>(null) }
     var quizTopic by remember { mutableStateOf<String?>(null) }
 
@@ -115,6 +126,21 @@ fun QuizScreen() {
     var summaryError by remember { mutableStateOf<String?>(null) }
     var showSummaryView by remember { mutableStateOf(false) }
     var showSaveOptions by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showQuizView, showSummaryView, isFocusMode) {
+        val activity = context as? Activity ?: return@LaunchedEffect
+        val shouldBeFocused = (showQuizView || showSummaryView) && isFocusMode
+        FocusModeController.setImmersive(activity, shouldBeFocused)
+        FocusModeState.isActive.value = shouldBeFocused
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            val activity = context as? Activity
+            if (activity != null) FocusModeController.setImmersive(activity, false)
+            FocusModeState.isActive.value = false
+        }
+    }
 
     val txtSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
         if (uri != null && summaryText != null) {
@@ -148,17 +174,29 @@ fun QuizScreen() {
     if (showQuizView && generatedQuiz != null) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("←", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.clickable { showQuizView = false })
-                Text("✕", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.clickable {
+                IconButton(onClick = { showQuizView = false }) {
+                    Icon(Icons.Outlined.ArrowBack, contentDescription = "Back")
+                }
+
+                IconButton(onClick = { isFocusMode = !isFocusMode }) {
+                    Icon(
+                        if (isFocusMode) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
+                        contentDescription = "Toggle focus mode"
+                    )
+                }
+
+                IconButton(onClick = {
                     generatedQuiz = null
                     quizError = null
                     showQuizView = false
                     quizTitle = "Quiz"
-                })
+                }) {
+                    Icon(Icons.Outlined.Close, contentDescription = "Discard quiz")
+                }
             }
             QuizPlayer(
                 questions = generatedQuiz ?: emptyList(),
@@ -183,17 +221,31 @@ fun QuizScreen() {
     if (showSummaryView && summaryText != null) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("←", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.clickable { showSummaryView = false })
-                Text("Save summary", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.clickable { showSaveOptions = !showSaveOptions })
-                Text("✕", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.clickable {
+                IconButton(onClick = { showSummaryView = false }) {
+                    Icon(Icons.Outlined.ArrowBack, contentDescription = "Back")
+                }
+
+                IconButton(onClick = { isFocusMode = !isFocusMode }) {
+                    Icon(
+                        if (isFocusMode) Icons.Outlined.FullscreenExit else Icons.Outlined.Fullscreen,
+                        contentDescription = "Toggle focus mode"
+                    )
+                }
+
+                IconButton(onClick = { showSaveOptions = !showSaveOptions }) {
+                    Icon(Icons.Outlined.Save, contentDescription = "Save summary")
+                }
+                IconButton(onClick = {
                     summaryText = null
                     summaryError = null
                     showSummaryView = false
-                })
+                }) {
+                    Icon(Icons.Outlined.Close, contentDescription = "Discard summary")
+                }
             }
 
             if (showSaveOptions) {
@@ -374,7 +426,7 @@ fun QuizScreen() {
             modifier = Modifier.fillMaxWidth().clickable {
                 if (generatedQuiz != null) {
                     showQuizView = true
-                } else {
+                } else if (BuildConfig.DEBUG) {
                     checkProAccess { hasPro ->
                         if (hasPro) {
                             showGenerateDialog = true
@@ -382,6 +434,8 @@ fun QuizScreen() {
                             (context as? MainActivity)?.paywallLauncher?.launch()
                         }
                     }
+                } else {
+                    showGenerateDialog = true
                 }
             },
             shape = RoundedCornerShape(16.dp),
@@ -416,6 +470,7 @@ fun QuizScreen() {
             units = units,
             onDismiss = { showGenerateDialog = false },
             onGenerate = { questionCount, unitCode, topic, timerMinutes ->
+                try{
                 showGenerateDialog = false
                 isGenerating = true
                 quizError = null
@@ -452,6 +507,10 @@ fun QuizScreen() {
                     } finally {
                         isGenerating = false
                     }
+                }
+                }catch(e: Throwable) {
+                android.widget.Toast.makeText(context, "Crash before a quiz started: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                isGenerating = false
                 }
             }
         )
@@ -490,6 +549,7 @@ private fun GenerateQuizDialog(
     var selectedTopic by remember { mutableStateOf<String?>(null) }
     var timerEnabled by remember { mutableStateOf(false) }
     var timerMinutes by remember { mutableStateOf(10) }
+    val context = LocalContext.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -563,7 +623,13 @@ private fun GenerateQuizDialog(
         confirmButton = {
             val canGenerate = hasSelectedNote || (selectedUnit != null && (selectedUnit?.topics?.isBlank() != false || selectedTopic != null))
             TextButton(
-                onClick = { onGenerate(questionCount, selectedUnit?.code, selectedTopic, if (timerEnabled) timerMinutes else null) },
+                onClick = {
+                    try {
+                        onGenerate(questionCount, selectedUnit?.code, selectedTopic, if (timerEnabled) timerMinutes else null)
+                    } catch (e: Throwable) {
+                        android.widget.Toast.makeText(context, "Dialog crash: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                },
                 enabled = canGenerate
             ) {
                 Text("Generate")

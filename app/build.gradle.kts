@@ -15,7 +15,7 @@ android {
         applicationId = "com.phronesis.mobile"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
+        versionCode = 3
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -39,9 +39,10 @@ android {
 }
 
 dependencies {
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("com.revenuecat.purchases:purchases-ui:8.+")
-    implementation("com.revenuecat.purchases:purchases:8.+")
+    implementation("com.revenuecat.purchases:purchases-ui:9.+")
+    implementation("com.revenuecat.purchases:purchases:9.+")
     implementation("com.google.firebase:firebase-appcheck-debug")
     implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
     implementation("com.google.firebase:firebase-ai")
