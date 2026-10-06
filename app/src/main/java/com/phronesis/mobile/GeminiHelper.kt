@@ -111,13 +111,33 @@ object GeminiHelper {
         val prompt = content {
             inlineData(bytes, "application/pdf")
             text("""
-                This document is a university teaching timetable covering many programs.
-                Extract ONLY the schedule for the program "$program".
-                Output ONLY valid JSON, no markdown, no code fences, in exactly this shape:
-                [{"day":"Monday","unitCode":"CIT 3103","startTime":"7:00 AM","endTime":"10:00 AM","venue":"TB 17"}]
-                Combine consecutive same-unit time blocks into one entry with the full start/end time range.
-                If the program isn't found in the document, return an empty array [].
-            """.trimIndent())
+            This document is a university teaching timetable. It may be laid out in any format —
+            a grid/table, a day-by-day list, a column-per-day layout, or something else entirely.
+            It may cover one program or many programs together.
+
+            Carefully read the ENTIRE document, including any text that is rotated, in small print,
+            in footnotes, or spread across multiple pages or columns. Identify every class session
+            that belongs specifically to the program "$program" (match flexibly — the program name
+            in the document might be abbreviated, reordered, or formatted differently than exactly
+            "$program", so use your judgment to find the right match).
+
+            For each class session belonging to that program, extract:
+            - day: the full day name (e.g. "Monday")
+            - unitCode: the unit/course code exactly as written (e.g. "CIT 3103")
+            - startTime and endTime: in a consistent "h:mm AM/PM" format, converting from 24-hour
+              time if needed
+            - venue: the room/venue code
+
+            Combine consecutive time blocks for the same unit on the same day into a single entry
+            with the full start/end time range, rather than listing them separately.
+
+            Output ONLY valid JSON, no markdown, no code fences, no extra commentary, in exactly
+            this shape:
+            [{"day":"Monday","unitCode":"CIT 3103","startTime":"7:00 AM","endTime":"10:00 AM","venue":"TB 17"}]
+
+            If you cannot find the program "$program" anywhere in the document after a thorough
+            search, return an empty array [].
+        """.trimIndent())
         }
         model.generateContent(prompt).text ?: "[]"
     }

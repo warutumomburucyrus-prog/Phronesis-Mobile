@@ -68,16 +68,17 @@ class MainActivity : ComponentActivity() {
         FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
             DebugAppCheckProviderFactory.getInstance()
         )
-
         if (BuildConfig.DEBUG) {
             Purchases.logLevel = LogLevel.DEBUG
-            Purchases.configure(
-                PurchasesConfiguration.Builder(
-                    this,
-                    "test_ENqGSljZcZxGVssHerDUCMWJUhZ"
-                ).build()
-            )
         }
+        val revenueCatKey = if (BuildConfig.DEBUG) {
+            "test_ENqGSljZcZxGVssHerDUCMWJUhZ"
+        } else {
+            "goog_SmliQEFpJEKzAYgrzuualrjUxmI"
+        }
+        Purchases.configure(
+            PurchasesConfiguration.Builder(this, revenueCatKey).build()
+        )
 
         paywallLauncher = PaywallActivityLauncher(this, object : PaywallResultHandler {
             override fun onActivityResult(result: PaywallResult) {

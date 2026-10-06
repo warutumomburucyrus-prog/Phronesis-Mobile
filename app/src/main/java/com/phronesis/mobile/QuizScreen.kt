@@ -426,7 +426,7 @@ fun QuizScreen() {
             modifier = Modifier.fillMaxWidth().clickable {
                 if (generatedQuiz != null) {
                     showQuizView = true
-                } else if (BuildConfig.DEBUG) {
+                } else {
                     checkProAccess { hasPro ->
                         if (hasPro) {
                             showGenerateDialog = true
@@ -434,11 +434,9 @@ fun QuizScreen() {
                             (context as? MainActivity)?.paywallLauncher?.launch()
                         }
                     }
-                } else {
-                    showGenerateDialog = true
                 }
-            },
-            shape = RoundedCornerShape(16.dp),
+            }
+            ,shape = RoundedCornerShape(16.dp),
             color = Terracotta.copy(alpha = 0.75f),
             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
         ) {
