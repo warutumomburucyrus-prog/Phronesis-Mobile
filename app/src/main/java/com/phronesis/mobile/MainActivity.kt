@@ -53,6 +53,10 @@ object Routes {
     const val CONTROL_PANEL = "ControlPanel"
 }
 
+object PagerLockState {
+    val locked = mutableStateOf(false)
+}
+
 private val pageOrder = listOf(Routes.SCHEDULE, Routes.UNITS, Routes.DASHBOARD, Routes.QUIZ, Routes.CONTROL_PANEL)
 
 class MainActivity : ComponentActivity() {
@@ -68,9 +72,8 @@ class MainActivity : ComponentActivity() {
         FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
             DebugAppCheckProviderFactory.getInstance()
         )
-        if (BuildConfig.DEBUG) {
-            Purchases.logLevel = LogLevel.DEBUG
-        }
+        Purchases.logLevel = LogLevel.DEBUG
+
         val revenueCatKey = if (BuildConfig.DEBUG) {
             "test_ENqGSljZcZxGVssHerDUCMWJUhZ"
         } else {
@@ -137,6 +140,7 @@ fun PhronesisApp() {
                         NavigationBarItem(
                             selected = pagerState.currentPage == index,
                             onClick = { goTo(route) },
+                            enabled = !PagerLockState.locked.value,
                             icon = { Icon(iconFor(route), contentDescription = labelFor(route)) },
                             label = { Text(labelFor(route)) }
                         )
@@ -148,6 +152,7 @@ fun PhronesisApp() {
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = pageOrder.size,
+            userScrollEnabled = !PagerLockState.locked.value,
             modifier = Modifier.padding(innerPadding)
         ) { pageIndex ->
             when (pageOrder[pageIndex]) {

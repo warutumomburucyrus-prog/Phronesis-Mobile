@@ -15,7 +15,7 @@ android {
         applicationId = "com.phronesis.mobile"
         minSdk = 26
         targetSdk = 37
-        versionCode = 5
+        versionCode = 9
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

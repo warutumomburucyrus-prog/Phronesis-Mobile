@@ -58,7 +58,7 @@ object GeminiHelper {
         val focusLine = if (focus.isNotBlank()) " Focus specifically on: $focus." else ""
         val prompt = content {
             inlineData(bytes, "application/pdf")
-            text("Summarize this document clearly and concisely, using short headings where useful.$focusLine Keep it factual and easy to review before an exam.")
+            text("Summarize this document clearly and concisely.$focusLine Keep it factual and easy to review before an exam. Format with Markdown using only: '### ' headings, '- ' bullet points (one level, no nested bullets), and **bold** for key terms. No tables, no code blocks, no horizontal lines.")
         }
         model.generateContent(prompt).text ?: "No summary generated."
     }

@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material3.IconButton
 import android.app.Activity
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.runtime.LaunchedEffect
 import com.phronesis.mobile.BuildConfig
 
@@ -128,6 +129,7 @@ fun QuizScreen() {
     var showSaveOptions by remember { mutableStateOf(false) }
 
     LaunchedEffect(showQuizView, showSummaryView, isFocusMode) {
+        PagerLockState.locked.value = showQuizView || showSummaryView
         val activity = context as? Activity ?: return@LaunchedEffect
         val shouldBeFocused = (showQuizView || showSummaryView) && isFocusMode
         FocusModeController.setImmersive(activity, shouldBeFocused)
@@ -144,13 +146,13 @@ fun QuizScreen() {
 
     val txtSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
         if (uri != null && summaryText != null) {
-            context.contentResolver.openOutputStream(uri)?.use { it.write(summaryText!!.toByteArray()) }
+            context.contentResolver.openOutputStream(uri)?.use { it.write(stripMarkdown(summaryText!!).toByteArray()) }
         }
         showSaveOptions = false
     }
     val pdfSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri: Uri? ->
         if (uri != null && summaryText != null) {
-            context.contentResolver.openOutputStream(uri)?.use { writeTextAsPdf(summaryText!!, it) }
+            context.contentResolver.openOutputStream(uri)?.use {writeTextAsPdf(stripMarkdown(summaryText!!), it) }
         }
         showSaveOptions = false
     }
@@ -277,19 +279,15 @@ fun QuizScreen() {
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-                SelectionContainer {
-                    Text(summaryText ?: "", style = MaterialTheme.typography.bodyMedium)
-                }
+            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+
+                MarkdownSummary(summaryText ?: "")
+
                 Spacer(modifier = Modifier.height(12.dp))
-                Surface(
-                    modifier = Modifier.clickable {
-                        clipboardManager.setText(AnnotatedString(summaryText ?: ""))
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    color = Clay.copy(alpha = 0.4f)
-                ) {
-                    Text("Copy", modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                IconButton(onClick = {
+                    clipboardManager.setText(AnnotatedString(stripMarkdown(summaryText ?: "")))
+                }) {
+                    Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy summary")
                 }
             }
         }

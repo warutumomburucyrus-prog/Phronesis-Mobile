@@ -8,7 +8,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 object FocusModeController {
     fun setImmersive(activity: Activity, enabled: Boolean) {
         val window = activity.window
-        WindowCompat.setDecorFitsSystemWindows(window, !enabled)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         if (enabled) {
             controller.hide(WindowInsetsCompat.Type.systemBars())
