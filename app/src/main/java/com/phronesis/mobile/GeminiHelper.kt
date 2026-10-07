@@ -105,6 +105,26 @@ object GeminiHelper {
         model.generateContent(prompt).text ?: """{"topics":[]}"""
     }
 
+    suspend fun identifyTopicsFromOutline(context: android.content.Context, uri: android.net.Uri, code: String, unitName: String): String = withTokenRetry {
+        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: throw Exception("Couldn't read that file.")
+        val prompt = content {
+            inlineData(bytes, "application/pdf")
+            text(
+                """
+            This is the course outline for "$code — $unitName".
+            List the main topics the course covers, in the order they are taught.
+            Use short topic names, with no week numbers or numbering.
+            Only include topics that actually appear in the outline.
+            Output ONLY valid JSON, no markdown, no code fences, in exactly this shape:
+            {"topics":["Topic one","Topic two","Topic three"]}
+            """.trimIndent()
+            )
+        }
+        model.generateContent(prompt).text ?: """{"topics":[]}"""
+    }
+
+
     suspend fun parseTimetablePdf(context: Context, uri: Uri, program: String): String = withTokenRetry {
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             ?: throw IllegalStateException("Couldn't read the timetable PDF.")

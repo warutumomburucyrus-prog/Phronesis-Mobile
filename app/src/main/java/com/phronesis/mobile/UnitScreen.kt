@@ -1,5 +1,6 @@
 package com.phronesis.mobile
 
+import android.content.Intent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,6 +16,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 @Composable
 fun UnitsScreen() {
@@ -25,6 +29,42 @@ fun UnitsScreen() {
     val units by db.unitDao().getAll().collectAsState(initial = emptyList())
     var editingUnit by remember { mutableStateOf<UnitEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
+
+    var outlineUnit by remember { mutableStateOf<UnitEntity?>(null) }
+
+    var outlineLoadingFor by remember { mutableStateOf<String?>(null) }
+    var outlineError by remember { mutableStateOf<String?>(null) }
+
+    val outlinePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uri: Uri? = result.data?.data
+        val unit = outlineUnit
+        if (uri != null && unit != null) {
+            outlineLoadingFor = unit.code
+            outlineError = null
+            coroutineScope.launch {
+                try {
+                    val json = GeminiHelper.identifyTopicsFromOutline(context, uri, unit.code, unit.name)
+                    val topics = parseUnitTopicsJson(json)
+                    if (topics.isEmpty()) {
+                        outlineError = "No topics found in that file. Check that it's the course outline for this unit."
+                    } else {
+                        db.unitDao().update(unit.copy(topics = topics.joinToString(", ")))
+                        topics.forEach { topic ->
+                            if (db.topicProgressDao().getOne(unit.code, topic) == null) {
+                                db.topicProgressDao().insert(TopicProgressEntity(unitCode = unit.code, topic = topic))
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    outlineError = e.message ?: "Couldn't read that outline right now."
+                } finally {
+                    outlineLoadingFor = null
+                }
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Your units", style = MaterialTheme.typography.headlineSmall)
@@ -51,6 +91,24 @@ fun UnitsScreen() {
                         if (unit.name.isNotBlank()) {
                             Text(unit.code, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall)
                         }
+                        if (unit.topics.isBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    outlineUnit = unit
+                                    val pick = Intent(Intent.ACTION_GET_CONTENT).apply {
+                                        type = "*/*"
+                                        addCategory(Intent.CATEGORY_OPENABLE)
+                                    }
+                                    outlinePicker.launch(Intent.createChooser(pick, "Choose a file manager"))
+                                },
+                                enabled = outlineLoadingFor != unit.code,
+                                colors = ButtonDefaults.buttonColors(containerColor = Terracotta),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(if (outlineLoadingFor == unit.code) "Reading outline..." else "Fill in topics", color = Color.White)
+                            }
+                        }
                         if (unit.topics.isNotBlank()) {
                             Text(unit.topics, color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodySmall)
                         }
@@ -61,6 +119,10 @@ fun UnitsScreen() {
             if (units.isEmpty()) {
                 Text("No units yet. Import your timetable on the Schedule page, or add a class there, and your units will appear here.", style = MaterialTheme.typography.bodySmall)
             }
+        }
+
+        outlineError?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
 
         val hasUnnamedUnits = units.any { it.name.isBlank() }
