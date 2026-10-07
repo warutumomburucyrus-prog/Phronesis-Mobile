@@ -115,7 +115,8 @@ object GeminiHelper {
             This is the course outline for "$code — $unitName".
             List the main topics the course covers, in the order they are taught.
             Use short topic names, with no week numbers or numbering.
-            Only include topics that actually appear in the outline.
+            Only include subject topics that actually appear in the outline.
+Leave out anything administrative: registration, orientation, examinations, revision, continuous assessment tests (CATs), public holidays, reading weeks, mode of delivery, materials, assessment weightings and reading lists.
             Output ONLY valid JSON, no markdown, no code fences, in exactly this shape:
             {"topics":["Topic one","Topic two","Topic three"]}
             """.trimIndent()

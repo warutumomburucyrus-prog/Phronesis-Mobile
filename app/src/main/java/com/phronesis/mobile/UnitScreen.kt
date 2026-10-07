@@ -19,6 +19,10 @@ import androidx.compose.ui.text.font.FontWeight
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 
 @Composable
 fun UnitsScreen() {
@@ -111,6 +115,14 @@ fun UnitsScreen() {
                         }
                         if (unit.topics.isNotBlank()) {
                             Text(unit.topics, color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = {
+                                coroutineScope.launch {
+                                    db.topicProgressDao().deleteForUnit(unit.code)
+                                    db.unitDao().update(unit.copy(topics = ""))
+                                }
+                            }) {
+                                Text("Clear topics", color = Color.White)
+                            }
                         }
                     }
                 }
@@ -249,7 +261,11 @@ private fun UnitDialog(
     onSave: (UnitEntity) -> Unit,
     onDelete: (UnitEntity) -> Unit
 ) {
-    var code by remember { mutableStateOf(existing?.code ?: "") }
+    var codeField by remember {
+        val start = formatUnitCode(existing?.code ?: "")
+        mutableStateOf(TextFieldValue(start, TextRange(start.length)))
+    }
+    val code = codeField.text
     var name by remember { mutableStateOf(existing?.name ?: "") }
 
     AlertDialog(
@@ -257,14 +273,29 @@ private fun UnitDialog(
         title = { Text(if (existing == null) "Add unit" else "Edit unit") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = code, onValueChange = { code = it }, label = { Text("Unit code") })
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Unit name (optional)") })
+                OutlinedTextField(
+                    value = codeField,
+                    onValueChange = { v ->
+                        val formatted = formatUnitCode(v.text)
+                        codeField = TextFieldValue(formatted, TextRange(formatted.length))
+                    },
+                    label = { Text("Unit code") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters)
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Unit name") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
+                )
             }
         },
         confirmButton = {
             TextButton(onClick = {
                 if (code.isNotBlank()) {
-                    onSave(UnitEntity(id = existing?.id ?: 0, code = code, name = name))
+                    onSave(existing?.copy(code = code, name = name) ?: UnitEntity(code = code, name = name))
                 }
             }) { Text("Save") }
         },

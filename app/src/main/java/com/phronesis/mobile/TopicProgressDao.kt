@@ -18,6 +18,9 @@ interface TopicProgressDao {
     @Query("SELECT * FROM topic_progress WHERE unitCode = :unitCode AND topic = :topic LIMIT 1")
     suspend fun getOne(unitCode: String, topic: String): TopicProgressEntity?
 
+    @Query("DELETE FROM topic_progress WHERE unitCode = :unitCode")
+    suspend fun deleteForUnit(unitCode: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entry: TopicProgressEntity)
 

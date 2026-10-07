@@ -25,6 +25,10 @@ import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 
 private val dayOrder = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
@@ -257,7 +261,11 @@ private fun ClassSessionDialog(
 ) {
     var day by remember { mutableStateOf(canonicalDay(existing?.day ?: "Monday")) }
     var dayMenuOpen by remember { mutableStateOf(false) }
-    var unitCode by remember { mutableStateOf(existing?.unitCode ?: "") }
+    var unitCodeField by remember {
+        val start = formatUnitCode(existing?.unitCode ?: "")
+        mutableStateOf(TextFieldValue(start, TextRange(start.length)))
+    }
+    val unitCode = unitCodeField.text
     var startTime by remember { mutableStateOf(existing?.startTime ?: "") }
     var endTime by remember { mutableStateOf(existing?.endTime ?: "") }
     var venue by remember { mutableStateOf(existing?.venue ?: "") }
@@ -278,8 +286,23 @@ private fun ClassSessionDialog(
                         }
                     }
                 }
-                OutlinedTextField(value = unitCode, onValueChange = { unitCode = it }, label = { Text("Unit code") })
-                OutlinedTextField(value = courseName, onValueChange = { courseName = it }, label = { Text("Course name") })
+                OutlinedTextField(
+                    value = unitCodeField,
+                    onValueChange = { v ->
+                        val formatted = formatUnitCode(v.text)
+                        unitCodeField = TextFieldValue(formatted, TextRange(formatted.length))
+                    },
+                    label = { Text("Unit code") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters)
+                )
+                OutlinedTextField(
+                    value = courseName,
+                    onValueChange = { courseName = it },
+                    label = { Text("Course name") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, autoCorrectEnabled = true)
+                )
                 OutlinedTextField(value = startTime, onValueChange = { startTime = it }, label = { Text("Start time") })
                 OutlinedTextField(value = endTime, onValueChange = { endTime = it }, label = { Text("End time") })
                 OutlinedTextField(value = venue, onValueChange = { venue = it }, label = { Text("Venue") })
