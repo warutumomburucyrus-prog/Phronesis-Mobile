@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import androidx.compose.ui.text.font.FontWeight
 
 @Composable
 fun UnitsScreen() {
@@ -41,9 +42,14 @@ fun UnitsScreen() {
                     border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.4f))
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
-                        Text(unit.code, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            unit.name.ifBlank { unit.code },
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
                         if (unit.name.isNotBlank()) {
-                            Text(unit.name, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
+                            Text(unit.code, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodySmall)
                         }
                         if (unit.topics.isNotBlank()) {
                             Text(unit.topics, color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodySmall)
@@ -53,7 +59,7 @@ fun UnitsScreen() {
             }
 
             if (units.isEmpty()) {
-                Text("No units yet — import your timetable to add them automatically, or add one manually below.", style = MaterialTheme.typography.bodySmall)
+                Text("No units yet. Import your timetable on the Schedule page, or add a class there, and your units will appear here.", style = MaterialTheme.typography.bodySmall)
             }
         }
 
@@ -63,8 +69,9 @@ fun UnitsScreen() {
 
         if (hasUnnamedUnits) {
             Spacer(modifier = Modifier.height(8.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth().clickable {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
                     val program = UserPrefs.getProgram(context)
                     if (!program.isNullOrBlank()) {
                         isFillingNames = true
@@ -87,13 +94,11 @@ fun UnitsScreen() {
                         }
                     }
                 },
-                shape = RoundedCornerShape(16.dp),
-                color = Amber.copy(alpha = 0.75f),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
+                enabled = !isFillingNames,
+                colors = ButtonDefaults.buttonColors(containerColor = Amber),
+                shape = RoundedCornerShape(16.dp)
             ) {
-                Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(if (isFillingNames) "Fetching names..." else "Fill in unit names", color = Color.White, style = MaterialTheme.typography.titleSmall)
-                }
+                Text(if (isFillingNames) "Fetching names..." else "Fill in unit names", color = Color.White)
             }
             fillNamesError?.let {
                 Spacer(modifier = Modifier.height(6.dp))
@@ -152,16 +157,7 @@ fun UnitsScreen() {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Surface(
-            modifier = Modifier.fillMaxWidth().clickable { showAddDialog = true },
-            shape = RoundedCornerShape(16.dp),
-            color = Terracotta.copy(alpha = 0.75f),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
-        ) {
-            Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("+ Add unit", color = Color.White, style = MaterialTheme.typography.titleSmall)
-            }
-        }
+
     }
 
     if (showAddDialog || editingUnit != null) {
