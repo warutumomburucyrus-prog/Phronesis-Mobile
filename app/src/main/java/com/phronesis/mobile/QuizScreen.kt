@@ -35,6 +35,8 @@ import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material3.IconButton
 import android.app.Activity
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.runtime.LaunchedEffect
 import com.phronesis.mobile.BuildConfig
 
@@ -161,7 +163,11 @@ fun QuizScreen() {
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
-            val name = uri.lastPathSegment ?: "Untitled note"
+            val name = context.contentResolver.query(
+                uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
+            )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                ?: uri.lastPathSegment?.substringAfterLast('/')
+                ?: "Untitled note"
             coroutineScope.launch {
                 val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 if (bytes != null) {
@@ -238,7 +244,15 @@ fun QuizScreen() {
                     )
                 }
 
-                IconButton(onClick = { showSaveOptions = !showSaveOptions }) {
+                IconButton(onClick = {
+                    checkProAccess { hasPro ->
+                        if (hasPro) {
+                            showSaveOptions = !showSaveOptions
+                        } else {
+                            (context as? MainActivity)?.paywallLauncher?.launch()
+                        }
+                    }
+                }) {
                     Icon(Icons.Outlined.Save, contentDescription = "Save summary")
                 }
                 IconButton(onClick = {
@@ -253,27 +267,19 @@ fun QuizScreen() {
             if (showSaveOptions) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp,  Alignment.CenterHorizontally)
                 ) {
-                    Surface(
-                        modifier = Modifier.weight(1f).clickable {
-                            val name = selectedNote?.name?.substringBeforeLast(".") ?: "summary"
-                            txtSaver.launch("$name.txt")
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        color = Clay.copy(alpha = 0.5f)
-                    ) {
-                        Text("Save as .txt", modifier = Modifier.padding(10.dp), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    IconButton(onClick = {
+                        val name = selectedNote?.name?.substringBeforeLast(".") ?: "summary"
+                        txtSaver.launch("$name.txt")
+                    }) {
+                        Icon(Icons.Outlined.Description, contentDescription = "Save as text file")
                     }
-                    Surface(
-                        modifier = Modifier.weight(1f).clickable {
-                            val name = selectedNote?.name?.substringBeforeLast(".") ?: "summary"
-                            pdfSaver.launch("$name.pdf")
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        color = Clay.copy(alpha = 0.5f)
-                    ) {
-                        Text("Save as .pdf", modifier = Modifier.padding(10.dp), textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    IconButton(onClick = {
+                        val name = selectedNote?.name?.substringBeforeLast(".") ?: "summary"
+                        pdfSaver.launch("$name.pdf")
+                    }) {
+                        Icon(Icons.Outlined.PictureAsPdf, contentDescription = "Save as PDF")
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
@@ -285,7 +291,13 @@ fun QuizScreen() {
 
                 Spacer(modifier = Modifier.height(12.dp))
                 IconButton(onClick = {
-                    clipboardManager.setText(AnnotatedString(stripMarkdown(summaryText ?: "")))
+                    checkProAccess { hasPro ->
+                        if (hasPro) {
+                            clipboardManager.setText(AnnotatedString(stripMarkdown(summaryText ?: "")))
+                        } else {
+                            (context as? MainActivity)?.paywallLauncher?.launch()
+                        }
+                    }
                 }) {
                     Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy summary")
                 }
