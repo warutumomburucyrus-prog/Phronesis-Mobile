@@ -18,11 +18,32 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 
 private val dayOrder = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+private fun canonicalDay(raw: String): String {
+    val t = raw.trim()
+    return dayOrder.firstOrNull { it.equals(t, ignoreCase = true) }
+        ?: dayOrder.firstOrNull { t.length >= 3 && it.startsWith(t.take(3), ignoreCase = true) }
+        ?: t
+}
+
+private fun timeToMinutes(raw: String): Int {
+    val t = raw.trim().uppercase()
+    val m = Regex("(\\d{1,2})[:.](\\d{2})").find(t) ?: return Int.MAX_VALUE
+    var h = m.groupValues[1].toInt()
+    val min = m.groupValues[2].toInt()
+    if (t.contains("PM") && h < 12) h += 12
+    if (t.contains("AM") && h == 12) h = 0
+    return h * 60 + min
+}
 
 @Composable
 fun ScheduleScreen() {
@@ -33,8 +54,10 @@ fun ScheduleScreen() {
     val coroutineScope = rememberCoroutineScope()
 
     val sessions by db.classSessionDao().getAll().collectAsState(initial = emptyList())
-    val grouped = sessions.groupBy { it.day }.toSortedMap(compareBy { dayOrder.indexOf(it) })
+    val grouped = sessions.groupBy { canonicalDay(it.day) }
+        .toSortedMap(compareBy({ val i = dayOrder.indexOf(it); if (i == -1) 99 else i }, { it }))
 
+    var showClearConfirm by remember { mutableStateOf(false) }
     var isImporting by remember { mutableStateOf(false) }
     var importError by remember { mutableStateOf<String?>(null) }
     var editingSession by remember { mutableStateOf<ClassSessionEntity?>(null) }
@@ -112,7 +135,7 @@ fun ScheduleScreen() {
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(day, color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                        classes.sortedBy { it.startTime }.forEach { session ->
+                        classes.sortedBy { timeToMinutes(it.startTime) }.forEach { session ->
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { editingSession = session },
                                 horizontalArrangement = Arrangement.SpaceBetween
@@ -149,26 +172,32 @@ fun ScheduleScreen() {
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(
-                modifier = Modifier.weight(1f).clickable { timetablePicker.launch(arrayOf("application/pdf")) },
-                shape = RoundedCornerShape(16.dp),
-                color = Terracotta.copy(alpha = 0.75f),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
-            ) {
-                Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("Import timetable PDF", color = Color.White, style = MaterialTheme.typography.titleSmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(onClick = { timetablePicker.launch(arrayOf("application/pdf")) }) {
+                    Icon(Icons.Outlined.UploadFile, contentDescription = "Import timetable PDF")
                 }
+                Text("Import", style = MaterialTheme.typography.labelSmall)
             }
-            Surface(
-                modifier = Modifier.weight(1f).clickable { showAddDialog = true },
-                shape = RoundedCornerShape(16.dp),
-                color = Clay.copy(alpha = 0.75f),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
-            ) {
-                Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("+ Add class", color = Color.White, style = MaterialTheme.typography.titleSmall)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(onClick = { showAddDialog = true }) {
+                    Icon(Icons.Outlined.Add, contentDescription = "Add class")
                 }
+                Text("Add class", style = MaterialTheme.typography.labelSmall)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(onClick = { showClearConfirm = true }, enabled = sessions.isNotEmpty()) {
+                    Icon(Icons.Outlined.DeleteSweep, contentDescription = "Clear schedule")
+                }
+                Text(
+                    "Clear",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (sessions.isNotEmpty()) Color.Unspecified else Color.Gray
+                )
             }
         }
     }
@@ -176,11 +205,18 @@ fun ScheduleScreen() {
     if (showAddDialog || editingSession != null) {
         ClassSessionDialog(
             existing = editingSession,
+            initialCourseName = editingSession?.let { s -> units.find { it.code == s.unitCode }?.name } ?: "",
             onDismiss = { showAddDialog = false; editingSession = null },
-            onSave = { session ->
+            onSave = { session, courseName ->
                 coroutineScope.launch {
                     if (session.id == 0L) db.classSessionDao().insert(session)
                     else db.classSessionDao().update(session)
+                    val code = session.unitCode.trim()
+                    if (code.isNotBlank() && courseName.isNotBlank()) {
+                        val unit = db.unitDao().getByCode(code)
+                        if (unit == null) db.unitDao().insert(UnitEntity(code = code, name = courseName))
+                        else if (unit.name != courseName) db.unitDao().update(unit.copy(name = courseName))
+                    }
                 }
                 showAddDialog = false
                 editingSession = null
@@ -191,28 +227,59 @@ fun ScheduleScreen() {
             }
         )
     }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("Clear schedule?") },
+            text = { Text("This removes every class so you can import a fresh timetable. Your units and notes are not touched.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    coroutineScope.launch { db.classSessionDao().clearAll() }
+                    showClearConfirm = false
+                }) { Text("Clear") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
 }
 
 @Composable
 private fun ClassSessionDialog(
     existing: ClassSessionEntity?,
+    initialCourseName: String,
     onDismiss: () -> Unit,
-    onSave: (ClassSessionEntity) -> Unit,
+    onSave: (ClassSessionEntity, String) -> Unit,
     onDelete: (ClassSessionEntity) -> Unit
 ) {
-    var day by remember { mutableStateOf(existing?.day ?: "Monday") }
+    var day by remember { mutableStateOf(canonicalDay(existing?.day ?: "Monday")) }
+    var dayMenuOpen by remember { mutableStateOf(false) }
     var unitCode by remember { mutableStateOf(existing?.unitCode ?: "") }
     var startTime by remember { mutableStateOf(existing?.startTime ?: "") }
     var endTime by remember { mutableStateOf(existing?.endTime ?: "") }
     var venue by remember { mutableStateOf(existing?.venue ?: "") }
+    var courseName by remember { mutableStateOf(initialCourseName) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (existing == null) "Add class" else "Edit class") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = day, onValueChange = { day = it }, label = { Text("Day") })
+                Box {
+                    OutlinedButton(onClick = { dayMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Day: $day")
+                    }
+                    DropdownMenu(expanded = dayMenuOpen, onDismissRequest = { dayMenuOpen = false }) {
+                        dayOrder.forEach { d ->
+                            DropdownMenuItem(text = { Text(d) }, onClick = { day = d; dayMenuOpen = false })
+                        }
+                    }
+                }
                 OutlinedTextField(value = unitCode, onValueChange = { unitCode = it }, label = { Text("Unit code") })
+                OutlinedTextField(value = courseName, onValueChange = { courseName = it }, label = { Text("Course name") })
                 OutlinedTextField(value = startTime, onValueChange = { startTime = it }, label = { Text("Start time") })
                 OutlinedTextField(value = endTime, onValueChange = { endTime = it }, label = { Text("End time") })
                 OutlinedTextField(value = venue, onValueChange = { venue = it }, label = { Text("Venue") })
@@ -224,7 +291,8 @@ private fun ClassSessionDialog(
                     ClassSessionEntity(
                         id = existing?.id ?: 0,
                         day = day, unitCode = unitCode, startTime = startTime, endTime = endTime, venue = venue
-                    )
+                    ),
+                    courseName.trim()
                 )
             }) { Text("Save") }
         },

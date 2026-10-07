@@ -10,5 +10,6 @@ data class ClassSessionEntity(
     val unitCode: String,
     val startTime: String,
     val endTime: String,
-    val venue: String
+    val venue: String,
+    val courseName: String = ""
 )
