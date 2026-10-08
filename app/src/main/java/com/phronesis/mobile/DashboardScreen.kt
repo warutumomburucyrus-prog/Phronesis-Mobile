@@ -22,6 +22,8 @@ import java.time.format.TextStyle
 import java.util.Locale
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 @Composable
 fun DashboardScreen(onBubbleClick: (String) -> Unit) {
@@ -36,6 +38,19 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
     val units by db.unitDao().getAll().collectAsState(initial = emptyList())
     val assignments by db.assignmentDao().getAll().collectAsState(initial = emptyList())
     val topicProgress by db.topicProgressDao().getAll().collectAsState(initial = emptyList())
+
+    LaunchedEffect(Unit) {
+        try {
+            db.classSessionDao().getAll().first()
+            db.unitDao().getAll().first()
+            db.assignmentDao().getAll().first()
+            db.topicProgressDao().getAll().first()
+            delay(100)
+        } catch (e: Exception) {
+            // If anything fails, don't trap the user on the splash screen.
+        }
+        SplashState.ready.value = true
+    }
 
     val todaysClassesText = remember(sessions, units) {
         val todayName = LocalDate.now().dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)

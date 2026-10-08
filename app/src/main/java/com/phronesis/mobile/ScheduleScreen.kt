@@ -87,7 +87,7 @@ fun ScheduleScreen() {
                         db.classSessionDao().insert(
                             ClassSessionEntity(
                                 day = session.day,
-                                unitCode = session.unitCode,
+                                unitCode = tidyImportedCode(session.unitCode),
                                 startTime = session.startTime,
                                 endTime = session.endTime,
                                 venue = session.venue
@@ -96,7 +96,7 @@ fun ScheduleScreen() {
                     }
 
                     try {
-                        val distinctCodes = parsed.map { it.unitCode }.distinct()
+                        val distinctCodes = parsed.map { tidyImportedCode(it.unitCode) }.distinct()
                         val university = UserPrefs.getUniversity(context) ?: ""
                         val namesJson = GeminiHelper.identifyUnitNames(university, program, distinctCodes)
                         parseUnitNamesJson(namesJson).forEach { un ->

@@ -57,6 +57,10 @@ object PagerLockState {
     val locked = mutableStateOf(false)
 }
 
+object SplashState {
+    val ready = mutableStateOf(false)
+}
+
 private val pageOrder = listOf(Routes.SCHEDULE, Routes.UNITS, Routes.DASHBOARD, Routes.QUIZ, Routes.CONTROL_PANEL)
 
 class MainActivity : ComponentActivity() {
@@ -65,7 +69,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
 
-        installSplashScreen()
+        val splash = installSplashScreen()
+        val splashStart = android.os.SystemClock.uptimeMillis()
+        splash.setKeepOnScreenCondition {
+            !SplashState.ready.value && android.os.SystemClock.uptimeMillis() - splashStart < 3000
+        }
 
         super.onCreate(savedInstanceState)
 

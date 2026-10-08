@@ -110,7 +110,7 @@ fun UnitsScreen() {
                                 colors = ButtonDefaults.buttonColors(containerColor = Terracotta),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text(if (outlineLoadingFor == unit.code) "Reading outline..." else "Fill in topics", color = Color.White)
+                                Text(if (outlineLoadingFor == unit.code) "Reading outline..." else "Upload Course Outline", color = Color.White)
                             }
                         }
                         if (unit.topics.isNotBlank()) {
@@ -172,7 +172,7 @@ fun UnitsScreen() {
                 colors = ButtonDefaults.buttonColors(containerColor = Amber),
                 shape = RoundedCornerShape(16.dp)
             ) {
-                Text(if (isFillingNames) "Fetching names..." else "Fill in unit names", color = Color.White)
+                Text(if (isFillingNames) "Fetching names..." else "Fill in topics", color = Color.White)
             }
             fillNamesError?.let {
                 Spacer(modifier = Modifier.height(6.dp))
@@ -220,7 +220,7 @@ fun UnitsScreen() {
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
             ) {
                 Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(if (isFillingTopics) "Fetching topics..." else "Fill in topics", color = Color.White, style = MaterialTheme.typography.titleSmall)
+                    Text(if (isFillingTopics) "Fetching topics..." else "Auto-fill in topics", color = Color.White, style = MaterialTheme.typography.titleSmall)
                 }
             }
             fillTopicsError?.let {
