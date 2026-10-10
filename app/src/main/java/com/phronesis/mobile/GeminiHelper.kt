@@ -75,6 +75,12 @@ object GeminiHelper {
         """.trimIndent()
     }
 
+    private fun avoidLine(avoid: List<String>): String =
+        if (avoid.isEmpty()) ""
+        else "\nYou have already asked the questions below in earlier quizzes. " +
+                "Do not repeat them or ask close rewordings; cover different ideas, angles and difficulty:\n" +
+                avoid.joinToString("\n") { "- $it" }
+
     suspend fun summarizeNotesPdf(filePath: String, focus: String = ""): String = withTokenRetry {
         val bytes = readPdfBytes(filePath)
         val focusLine = if (focus.isNotBlank()) " Focus specifically on: $focus." else ""
@@ -85,17 +91,31 @@ object GeminiHelper {
         model.generateContent(prompt).text ?: "No summary generated."
     }
 
+    suspend fun generateTopicNotes(unitCode: String, unitName: String, topic: String): String = withTokenRetry {
+        val prompt = """
+            Write short study notes for a university student who is meeting the topic "$topic" in the
+            course "$unitCode — $unitName" for the first time and is about to take a quiz on it.
+            Start with a plain-language explanation of the big idea, then the key terms and rules, and
+            finish with one or two small worked examples. Keep it under 400 words so it can be read in
+            a few minutes. Write maths in plain text (for example x^2, sqrt(x), 3/4), never LaTeX.
+            Format with Markdown using only: '### ' headings, '- ' bullet points (one level, no nested
+            bullets), and **bold** for key terms. No tables, no code blocks, no horizontal lines.
+        """.trimIndent()
+        model.generateContent(prompt).text ?: "No notes generated."
+    }
+
     suspend fun generateQuizFromPdf(
         filePath: String,
         questionCount: Int,
         focus: String = "",
-        types: List<String> =listOf("multiple_choice", "short_answer", "math", "coding")
+        types: List<String> = listOf("multiple_choice", "short_answer", "math", "coding"),
+        avoid: List<String> = emptyList()
     ): String = withTokenRetry {
         val bytes = readPdfBytes(filePath)
         val focusLine = if (focus.isNotBlank()) " Focus specifically on: $focus." else ""
         val prompt = content {
             inlineData(bytes, "application/pdf")
-            text("Based on this document, generate exactly $questionCount quiz questions.$focusLine\n${quizInstruction(types)}")
+            text("Based on this document, generate exactly $questionCount quiz questions.$focusLine${avoidLine(avoid)}\n${quizInstruction(types)}")
         }
         model.generateContent(prompt).text ?: "[]"
     }
@@ -104,10 +124,11 @@ object GeminiHelper {
         sourceText: String,
         questionCount: Int,
         focus: String = "",
-        types: List<String> = listOf("multiple_choice", "short_answer", "math", "coding")
+        types: List<String> = listOf("multiple_choice", "short_answer", "math", "coding"),
+        avoid: List<String> = emptyList()
     ): String = withTokenRetry {
         val focusLine = if (focus.isNotBlank()) " Focus specifically on: $focus." else ""
-        val prompt = "Based on the topic \"$sourceText\", generate exactly $questionCount quiz questions.$focusLine\n${quizInstruction(types)}"
+        val prompt = "Based on the topic \"$sourceText\", generate exactly $questionCount quiz questions.$focusLine${avoidLine(avoid)}\n${quizInstruction(types)}"
         model.generateContent(prompt).text ?: "[]"
     }
 

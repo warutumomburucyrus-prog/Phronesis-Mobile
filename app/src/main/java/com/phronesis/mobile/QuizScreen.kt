@@ -42,7 +42,8 @@ import com.phronesis.mobile.BuildConfig
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.draw.clip
 
-private val sampleUnitNames = listOf("Calculus II (MATH201)", "Data Structures (CS301)", "Physics I (PHY110)")
+private val sampleUnitNames =
+    listOf("Calculus II (MATH201)", "Data Structures (CS301)", "Physics I (PHY110)")
 
 private fun deriveQuizTitle(focus: String, unitName: String?): String {
     val topic = focus.trim().ifBlank { unitName?.substringBefore(" (") }
@@ -79,7 +80,9 @@ private fun writeTextAsPdf(text: String, outputStream: java.io.OutputStream) {
     var pageNumber = 1
     var lineIndex = 0
     while (lineIndex < lines.size) {
-        val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create())
+        val page = document.startPage(
+            PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
+        )
         val canvas = page.canvas
         var y = margin + lineHeight
         while (lineIndex < lines.size && y < pageHeight - margin) {
@@ -94,6 +97,9 @@ private fun writeTextAsPdf(text: String, outputStream: java.io.OutputStream) {
     document.writeTo(outputStream)
     document.close()
 }
+
+
+private data class PendingQuiz(val count: Int, val unitCode: String, val topic: String, val timed: Boolean)
 
 @Composable
 fun QuizScreen() {
@@ -127,7 +133,11 @@ fun QuizScreen() {
             val result = try {
                 parseMarkJson(GeminiHelper.markAnswer(q.type, q.question, q.modelAnswer, answer))
             } catch (e: Exception) {
-                MarkResult(0, "Couldn't mark this one (${e.message?.take(80)}). Compare with the model answer below.", failed = true)
+                MarkResult(
+                    0,
+                    "Couldn't mark this one (${e.message?.take(80)}). Compare with the model answer below.",
+                    failed = true
+                )
             }
             quizMarks = quizMarks + (i to result)
             markingIndexes = markingIndexes - i
@@ -149,6 +159,98 @@ fun QuizScreen() {
     var summaryError by remember { mutableStateOf<String?>(null) }
     var showSummaryView by remember { mutableStateOf(false) }
     var showSaveOptions by remember { mutableStateOf(false) }
+    var pendingQuiz by remember { mutableStateOf<PendingQuiz?>(null) }
+    var notesText by remember { mutableStateOf<String?>(null) }
+    var notesFor by remember { mutableStateOf<PendingQuiz?>(null) }
+
+    val startQuiz: (Int, String?, String?, Boolean) -> Unit =
+        { questionCount, unitCode, topic, timed ->
+            try {
+                showGenerateDialog = false
+                isGenerating = true
+                quizError = null
+                quizCurrentIndex = 0
+                quizAnswers = emptyMap()
+                quizTextAnswers = emptyMap()
+                quizMarks = emptyMap()
+                markingIndexes = emptySet()
+                quizFinished = false
+                quizTimerTotalSeconds = null
+                quizTimerRemainingSeconds = null
+                val unitName = units.find { it.code == unitCode }?.name
+                quizUnitCode = unitCode
+                quizTopic = topic
+                quizTitle = deriveQuizTitle(topic ?: focusInput, unitName)
+                coroutineScope.launch {
+                    try {
+                        val topicOrFocus = topic ?: focusInput
+
+                        val historyKey = when {
+                            unitCode != null && topic != null -> "$unitCode|$topic"
+                            selectedNote != null -> "note|${selectedNote.id}"
+                            unitCode != null -> "unit|$unitCode"
+                            else -> "general"
+                        }
+                        val past = QuizHistory.getPast(context, historyKey)
+
+                        val rawJson = if (selectedNote != null) {
+                            GeminiHelper.generateQuizFromPdf(
+                                selectedNote.filePath,
+                                questionCount,
+                                topicOrFocus,
+                                avoid = past
+                            )
+                        } else {
+                            GeminiHelper.generateQuizFromText(
+                                unitName ?: "General study material",
+                                questionCount,
+                                topicOrFocus,
+                                avoid = past
+                            )
+                        }
+                        val parsed = parseQuizJson(rawJson)
+
+                        QuizHistory.addQuestions(context, historyKey, parsed.map { it.question })
+                        generatedQuiz = parsed
+                        if (timed) {
+                            val seconds =
+                                (parsed.sumOf { it.minutes } * 60 * 0.75).toInt().coerceAtLeast(60)
+                            quizTimerTotalSeconds = seconds
+                            quizTimerRemainingSeconds = seconds
+                        }
+
+                        showQuizView = true
+                        if (unitCode != null && topic != null) {
+                            val existing = db.topicProgressDao().getOne(unitCode, topic)
+                            val bumped = (existing?.familiarity ?: 0) + 15
+                            if (existing != null) {
+                                db.topicProgressDao()
+                                    .update(existing.copy(familiarity = bumped.coerceAtMost(100)))
+                            } else {
+                                db.topicProgressDao().insert(
+                                    TopicProgressEntity(
+                                        unitCode = unitCode,
+                                        topic = topic,
+                                        familiarity = 15
+                                    )
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        quizError = e.stackTraceToString().take(400)
+                    } finally {
+                        isGenerating = false
+                    }
+                }
+            } catch (e: Throwable) {
+                android.widget.Toast.makeText(
+                    context,
+                    "Crash before a quiz started: ${e.message}",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                isGenerating = false
+            }
+        }
 
     LaunchedEffect(showQuizView, showSummaryView, isFocusMode) {
         PagerLockState.locked.value = showQuizView || showSummaryView
@@ -166,18 +268,22 @@ fun QuizScreen() {
         }
     }
 
-    val txtSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
-        if (uri != null && summaryText != null) {
-            context.contentResolver.openOutputStream(uri)?.use { it.write(stripMarkdown(summaryText!!).toByteArray()) }
+    val txtSaver =
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
+            if (uri != null && summaryText != null) {
+                context.contentResolver.openOutputStream(uri)
+                    ?.use { it.write(stripMarkdown(summaryText!!).toByteArray()) }
+            }
+            showSaveOptions = false
         }
-        showSaveOptions = false
-    }
-    val pdfSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri: Uri? ->
-        if (uri != null && summaryText != null) {
-            context.contentResolver.openOutputStream(uri)?.use {writeTextAsPdf(stripMarkdown(summaryText!!), it) }
+    val pdfSaver =
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri: Uri? ->
+            if (uri != null && summaryText != null) {
+                context.contentResolver.openOutputStream(uri)
+                    ?.use { writeTextAsPdf(stripMarkdown(summaryText!!), it) }
+            }
+            showSaveOptions = false
         }
-        showSaveOptions = false
-    }
 
     val pdfPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -202,7 +308,9 @@ fun QuizScreen() {
     if (showQuizView && generatedQuiz != null) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -231,7 +339,9 @@ fun QuizScreen() {
                 currentIndex = quizCurrentIndex,
                 onIndexChange = { quizCurrentIndex = it },
                 answers = quizAnswers,
-                onAnswerConfirmed = { qIdx, optIdx -> quizAnswers = quizAnswers + (qIdx to optIdx) },
+                onAnswerConfirmed = { qIdx, optIdx ->
+                    quizAnswers = quizAnswers + (qIdx to optIdx)
+                },
                 textAnswers = quizTextAnswers,
                 onTextAnswerChange = { i, t -> quizTextAnswers = quizTextAnswers + (i to t) },
                 marks = quizMarks,
@@ -254,7 +364,9 @@ fun QuizScreen() {
     if (showSummaryView && summaryText != null) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -291,8 +403,13 @@ fun QuizScreen() {
 
             if (showSaveOptions) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp,  Alignment.CenterHorizontally)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(
+                        12.dp,
+                        Alignment.CenterHorizontally
+                    )
                 ) {
                     IconButton(onClick = {
                         val name = selectedNote?.name?.substringBeforeLast(".") ?: "summary"
@@ -310,7 +427,12 @@ fun QuizScreen() {
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp)
+            ) {
 
                 MarkdownSummary(summaryText ?: "")
 
@@ -318,7 +440,13 @@ fun QuizScreen() {
                 IconButton(onClick = {
                     checkProAccess { hasPro ->
                         if (hasPro) {
-                            clipboardManager.setText(AnnotatedString(stripMarkdown(summaryText ?: "")))
+                            clipboardManager.setText(
+                                AnnotatedString(
+                                    stripMarkdown(
+                                        summaryText ?: ""
+                                    )
+                                )
+                            )
                         } else {
                             (context as? MainActivity)?.paywallLauncher?.launch()
                         }
@@ -331,15 +459,61 @@ fun QuizScreen() {
         return
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    val readingFor = notesFor
+    if (notesText != null && readingFor != null) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { notesText = null; notesFor = null }) {
+                    Icon(Icons.Outlined.ArrowBack, contentDescription = "Back")
+                }
+                Text(readingFor.topic, style = MaterialTheme.typography.titleMedium)
+            }
+            Column(
+                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
+            ) {
+                MarkdownSummary(notesText ?: "")
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(16.dp).clickable {
+                    notesText = null
+                    notesFor = null
+                    startQuiz(readingFor.count, readingFor.unitCode, readingFor.topic, readingFor.timed)
+                },
+                shape = RoundedCornerShape(16.dp),
+                color = Terracotta.copy(alpha = 0.75f)
+            ) {
+                Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("Start quiz", color = Color.White)
+                }
+            }
+        }
+        return
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
 
         Surface(
-            modifier = Modifier.fillMaxWidth().clickable { pdfPicker.launch(arrayOf("application/pdf")) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { pdfPicker.launch(arrayOf("application/pdf")) },
             shape = RoundedCornerShape(16.dp),
             color = Amber.copy(alpha = 0.75f),
             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
         ) {
-            Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 14.dp)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
                 Text("Add notes", color = Color.White, style = MaterialTheme.typography.titleSmall)
             }
         }
@@ -351,20 +525,28 @@ fun QuizScreen() {
                     val isSelected = selectedNoteId == note.id
                     Box {
                         Surface(
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                selectedNoteId = if (isSelected) null else note.id
-                                summaryText = null
-                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedNoteId = if (isSelected) null else note.id
+                                    summaryText = null
+                                },
                             shape = RoundedCornerShape(12.dp),
                             color = Clay.copy(alpha = if (isSelected) 0.9f else 0.5f),
                             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(note.name, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    note.name,
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
                                 Text(
                                     "⋮",
                                     color = Color.White,
@@ -411,29 +593,39 @@ fun QuizScreen() {
         if (selectedNote != null) {
             Spacer(modifier = Modifier.height(16.dp))
             Surface(
-                modifier = Modifier.fillMaxWidth().clickable {
-                    if (summaryText != null) {
-                        showSummaryView = true
-                    } else {
-                        isSummarizing = true
-                        summaryError = null
-                        coroutineScope.launch {
-                            try {
-                                summaryText = GeminiHelper.summarizeNotesPdf(selectedNote.filePath, focusInput)
-                                showSummaryView = true
-                            } catch (e: Exception) {
-                                summaryError = e.stackTraceToString().take(400)
-                            } finally {
-                                isSummarizing = false
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (summaryText != null) {
+                            showSummaryView = true
+                        } else {
+                            isSummarizing = true
+                            summaryError = null
+                            coroutineScope.launch {
+                                try {
+                                    summaryText = GeminiHelper.summarizeNotesPdf(
+                                        selectedNote.filePath,
+                                        focusInput
+                                    )
+                                    showSummaryView = true
+                                } catch (e: Exception) {
+                                    summaryError = e.stackTraceToString().take(400)
+                                } finally {
+                                    isSummarizing = false
+                                }
                             }
                         }
-                    }
-                },
+                    },
                 shape = RoundedCornerShape(16.dp),
                 color = Clay.copy(alpha = 0.75f),
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
             ) {
-                Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 14.dp)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text(
                         if (summaryText != null) "See summary" else "Summarise notes",
                         color = Color.White,
@@ -451,31 +643,41 @@ fun QuizScreen() {
 
             summaryError?.let { error ->
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
         Surface(
-            modifier = Modifier.fillMaxWidth().clickable {
-                if (generatedQuiz != null) {
-                    showQuizView = true
-                } else {
-                    checkProAccess { hasPro ->
-                        if (hasPro) {
-                            showGenerateDialog = true
-                        } else {
-                            (context as? MainActivity)?.paywallLauncher?.launch()
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    if (generatedQuiz != null) {
+                        showQuizView = true
+                    } else {
+                        checkProAccess { hasPro ->
+                            if (hasPro) {
+                                showGenerateDialog = true
+                            } else {
+                                (context as? MainActivity)?.paywallLauncher?.launch()
+                            }
                         }
                     }
-                }
-            }
-            ,shape = RoundedCornerShape(16.dp),
+                }, shape = RoundedCornerShape(16.dp),
             color = Terracotta.copy(alpha = 0.75f),
             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
         ) {
-            Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 14.dp)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
                 Text(
                     if (generatedQuiz != null) "View quiz" else "Generate quiz",
                     color = Color.White,
@@ -486,14 +688,23 @@ fun QuizScreen() {
 
         if (isGenerating) {
             Spacer(modifier = Modifier.height(16.dp))
-            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 CircularProgressIndicator(modifier = Modifier.size(56.dp), strokeWidth = 5.dp)
             }
         }
 
         quizError?.let { error ->
             Spacer(modifier = Modifier.height(12.dp))
-            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Text(
+                error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 
@@ -504,59 +715,53 @@ fun QuizScreen() {
             onDismiss = { showGenerateDialog = false },
 
             onGenerate = { questionCount, unitCode, topic, timed ->
-                try{
                 showGenerateDialog = false
-                isGenerating = true
-                quizError = null
-                quizCurrentIndex = 0
-                quizAnswers = emptyMap()
-                quizTextAnswers = emptyMap()
-                quizMarks = emptyMap()
-                markingIndexes = emptySet()
-                quizFinished = false
-                quizTimerTotalSeconds = null
-                quizTimerRemainingSeconds = null
-                val unitName = units.find { it.code == unitCode }?.name
-                quizUnitCode = unitCode
-                quizTopic = topic
-                quizTitle = deriveQuizTitle(topic ?: focusInput, unitName)
-                coroutineScope.launch {
-                    try {
-                        val topicOrFocus = topic ?: focusInput
-                        val rawJson = if (selectedNote != null) {
-                            GeminiHelper.generateQuizFromPdf(selectedNote.filePath, questionCount, topicOrFocus)
+                if (unitCode != null && topic != null) {
+                    coroutineScope.launch {
+                        val existing = db.topicProgressDao().getOne(unitCode, topic)
+                        val isNew = existing == null || (existing.familiarity == 0 && existing.quizzesTaken == 0)
+                        if (isNew) {
+                            pendingQuiz = PendingQuiz(questionCount, unitCode, topic, timed)
                         } else {
-                            GeminiHelper.generateQuizFromText(unitName ?: "General study material", questionCount, topicOrFocus)
+                            startQuiz(questionCount, unitCode, topic, timed)
                         }
-
-                        val parsed = parseQuizJson(rawJson)
-                        generatedQuiz = parsed
-                        if (timed) {
-                            val seconds = (parsed.sumOf { it.minutes } * 60 * 0.75).toInt().coerceAtLeast(60)
-                            quizTimerTotalSeconds = seconds
-                            quizTimerRemainingSeconds = seconds
-                        }
-
-                        showQuizView = true
-                        if (unitCode != null && topic != null) {
-                            val existing = db.topicProgressDao().getOne(unitCode, topic)
-                            val bumped = (existing?.familiarity ?: 0) + 15
-                            if (existing != null) {
-                                db.topicProgressDao().update(existing.copy(familiarity = bumped.coerceAtMost(100)))
-                            } else {
-                                db.topicProgressDao().insert(TopicProgressEntity(unitCode = unitCode, topic = topic, familiarity = 15))
-                            }
-                        }
-                    } catch (e: Exception) {
-                        quizError = e.stackTraceToString().take(400)
-                    } finally {
-                        isGenerating = false
                     }
+                } else {
+                    startQuiz(questionCount, unitCode, topic, timed)
                 }
-                }catch(e: Throwable) {
-                android.widget.Toast.makeText(context, "Crash before a quiz started: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                isGenerating = false
-                }
+            }
+        )
+    }
+
+    pendingQuiz?.let { p ->
+        AlertDialog(
+            onDismissRequest = { pendingQuiz = null },
+            title = { Text("New topic") },
+            text = { Text("You haven't covered \"${p.topic}\" yet. Read short notes first, or go straight to the quiz?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingQuiz = null
+                    notesFor = p
+                    isGenerating = true
+                    quizError = null
+                    coroutineScope.launch {
+                        try {
+                            val unitName = units.find { it.code == p.unitCode }?.name ?: ""
+                            notesText = GeminiHelper.generateTopicNotes(p.unitCode, unitName, p.topic)
+                        } catch (e: Exception) {
+                            quizError = e.stackTraceToString().take(400)
+                            notesFor = null
+                        } finally {
+                            isGenerating = false
+                        }
+                    }
+                }) { Text("Read notes") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    pendingQuiz = null
+                    startQuiz(p.count, p.unitCode, p.topic, p.timed)
+                }) { Text("Quiz me anyway") }
             }
         )
     }
@@ -567,7 +772,10 @@ fun QuizScreen() {
             onDismissRequest = { renamingNote = null },
             title = { Text("Rename note") },
             text = {
-                OutlinedTextField(value = newName, onValueChange = { newName = it }, label = { Text("Name") })
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("Name") })
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -600,10 +808,12 @@ private fun GenerateQuizDialog(
         title = { Text("Generate quiz") },
         text = {
             Column(
-                modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Number of questions: $questionCount")
+                Text("Number of questions: $questionCount")                                 //shows number of questions
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     StepperButton("−") { if (questionCount > 1) questionCount-- }
                     StepperButton("+") { if (questionCount < 20) questionCount++ }
@@ -616,7 +826,10 @@ private fun GenerateQuizDialog(
                     Text("Timed quiz")
                 }
                 if (timerEnabled) {
-                    Text("The time is set by the questions Gemini writes.", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "The time is set by the questions Gemini writes.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
 
                 if (!hasSelectedNote) {
@@ -624,12 +837,16 @@ private fun GenerateQuizDialog(
                     Text("No note selected — choose a unit instead:")
                     units.forEach { unit ->
                         Surface(
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                selectedUnit = unit
-                                selectedTopic = null
-                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedUnit = unit
+                                    selectedTopic = null
+                                },
                             shape = RoundedCornerShape(10.dp),
-                            color = if (selectedUnit?.id == unit.id) Clay.copy(alpha = 0.8f) else Clay.copy(alpha = 0.3f),
+                            color = if (selectedUnit?.id == unit.id) Clay.copy(alpha = 0.8f) else Clay.copy(
+                                alpha = 0.3f
+                            ),
                             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f))
                         ) {
                             Text(
@@ -648,9 +865,13 @@ private fun GenerateQuizDialog(
                         Text("Which topic?")
                         topicsForUnit.forEach { topic ->
                             Surface(
-                                modifier = Modifier.fillMaxWidth().clickable { selectedTopic = topic },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedTopic = topic },
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (selectedTopic == topic) Terracotta.copy(alpha = 0.8f) else Terracotta.copy(alpha = 0.3f),
+                                color = if (selectedTopic == topic) Terracotta.copy(alpha = 0.8f) else Terracotta.copy(
+                                    alpha = 0.3f
+                                ),
                                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f))
                             ) {
                                 Text(topic, modifier = Modifier.padding(10.dp))
@@ -661,14 +882,19 @@ private fun GenerateQuizDialog(
             }
         },
         confirmButton = {
-            val canGenerate = hasSelectedNote || (selectedUnit != null && (selectedUnit?.topics?.isBlank() != false || selectedTopic != null))
+            val canGenerate =
+                hasSelectedNote || (selectedUnit != null && (selectedUnit?.topics?.isBlank() != false || selectedTopic != null))
             TextButton(
                 onClick = {
                     try {
                         QuizPrefs.setQuestionCount(context, questionCount)
                         onGenerate(questionCount, selectedUnit?.code, selectedTopic, timerEnabled)
                     } catch (e: Throwable) {
-                        android.widget.Toast.makeText(context, "Dialog crash: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                        android.widget.Toast.makeText(
+                            context,
+                            "Dialog crash: ${e.message}",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
                     }
                 },
                 enabled = canGenerate
@@ -685,7 +911,10 @@ private fun GenerateQuizDialog(
 @Composable
 private fun StepperButton(symbol: String, onClick: () -> Unit) {
     Box(
-        modifier = Modifier.size(36.dp).background(Terracotta, CircleShape).clickable(onClick = onClick),
+        modifier = Modifier
+            .size(36.dp)
+            .background(Terracotta, CircleShape)
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(symbol, color = Color.White, style = MaterialTheme.typography.titleMedium)
@@ -755,7 +984,9 @@ private fun QuizPlayer(
 
         if (!autoSubmitDone || markingIndexes.isNotEmpty()) {
             Column(
-                modifier = Modifier.fillMaxSize().padding(16.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
@@ -772,6 +1003,7 @@ private fun QuizPlayer(
                 !answers.containsKey(i) -> 0.0
                 question.type == "multiple_choice" ->
                     if (answers[i] == question.correctIndex) 1.0 else 0.0
+
                 else -> (marks[i]?.score ?: 0) / 10.0
             }
         }
@@ -782,11 +1014,18 @@ private fun QuizPlayer(
                 val existing = db.topicProgressDao().getOne(unitCode, topic)
                 if (existing != null) {
                     val newCount = existing.quizzesTaken + 1
-                    val newMastery = ((existing.mastery * existing.quizzesTaken) + percentThisAttempt) / newCount
-                    db.topicProgressDao().update(existing.copy(mastery = newMastery, quizzesTaken = newCount))
+                    val newMastery =
+                        ((existing.mastery * existing.quizzesTaken) + percentThisAttempt) / newCount
+                    db.topicProgressDao()
+                        .update(existing.copy(mastery = newMastery, quizzesTaken = newCount))
                 } else {
                     db.topicProgressDao().insert(
-                        TopicProgressEntity(unitCode = unitCode, topic = topic, mastery = percentThisAttempt, quizzesTaken = 1)
+                        TopicProgressEntity(
+                            unitCode = unitCode,
+                            topic = topic,
+                            mastery = percentThisAttempt,
+                            quizzesTaken = 1
+                        )
                     )
                 }
             }
@@ -796,13 +1035,21 @@ private fun QuizPlayer(
             return
         }
         Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("Score: %.1f / %d".format(score, questions.size), style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "Score: %.1f / %d".format(score, questions.size),
+                style = MaterialTheme.typography.headlineSmall
+            )
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Attempted ${answers.size} of ${questions.size}", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Attempted ${answers.size} of ${questions.size}",
+                style = MaterialTheme.typography.bodyMedium
+            )
             Spacer(modifier = Modifier.height(20.dp))
             Surface(
                 modifier = Modifier.clickable { reviewing = true },
@@ -819,9 +1066,14 @@ private fun QuizPlayer(
 
     val q = questions[currentIndex]
     val alreadyConfirmed = answers.containsKey(currentIndex)
-    var pendingSelection by remember(currentIndex) { mutableStateOf(answers[currentIndex] ?: pendingChoices[currentIndex]) }
+    var pendingSelection by remember(currentIndex) {
+        mutableStateOf(
+            answers[currentIndex] ?: pendingChoices[currentIndex]
+        )
+    }
     val isText = q.type != "multiple_choice"
-    val canConfirm = if (isText) !textAnswers[currentIndex].isNullOrBlank() else pendingSelection != null
+    val canConfirm =
+        if (isText) !textAnswers[currentIndex].isNullOrBlank() else pendingSelection != null
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (timerRemainingSeconds != null) {
@@ -829,14 +1081,18 @@ private fun QuizPlayer(
             val seconds = timerRemainingSeconds % 60
             Text(
                 "⏱ %d:%02d".format(minutes, seconds),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.labelLarge,
                 color = if (timerRemainingSeconds < 30) MaterialTheme.colorScheme.error else Color.Unspecified
             )
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -844,7 +1100,10 @@ private fun QuizPlayer(
                 val color = when {
                     answers.containsKey(i) -> Color(0xFF4CAF50)
                     (item.type == "multiple_choice" && pendingChoices[i] != null) ||
-                            (item.type != "multiple_choice" && !textAnswers[i].isNullOrBlank()) -> Color(0xFFFF9800)
+                            (item.type != "multiple_choice" && !textAnswers[i].isNullOrBlank()) -> Color(
+                        0xFFFF9800
+                    )
+
                     else -> Color(0xFFE57373)
                 }
                 Box(
@@ -864,7 +1123,10 @@ private fun QuizPlayer(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
         ) {
-            Text("Question ${currentIndex + 1} of ${questions.size}", style = MaterialTheme.typography.labelLarge)
+            Text(
+                "Question ${currentIndex + 1} of ${questions.size}",
+                style = MaterialTheme.typography.labelLarge
+            )
             Spacer(modifier = Modifier.height(12.dp))
             Text(q.question, style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(16.dp))
@@ -874,16 +1136,24 @@ private fun QuizPlayer(
                     value = textAnswers[currentIndex] ?: "",
                     onValueChange = { onTextAnswerChange(currentIndex, it) },
                     enabled = !alreadyConfirmed,
-                    label = { Text(when (q.type) {
-                        "coding" -> "Write your code"
-                        "math" -> "Show your working, then your final answer"
-                        else -> "Your answer"
-                    }) },
+                    label = {
+                        Text(
+                            when (q.type) {
+                                "coding" -> "Write your code"
+                                "math" -> "Show your working, then your final answer"
+                                else -> "Your answer"
+                            }
+                        )
+                    },
                     textStyle = if (q.type == "coding")
                         MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
                     else MaterialTheme.typography.bodyMedium,
-                    minLines = when (q.type) { "coding" -> 8; "math" -> 6; else -> 3 },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                    minLines = when (q.type) {
+                        "coding" -> 8; "math" -> 6; else -> 3
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
                 )
             }
 
@@ -897,10 +1167,13 @@ private fun QuizPlayer(
                     else -> Clay.copy(alpha = 0.25f)
                 }
                 Surface(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable(enabled = !alreadyConfirmed) {
-                        pendingSelection = optIndex
-                        pendingChoices[currentIndex] = optIndex
-                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        .clickable(enabled = !alreadyConfirmed) {
+                            pendingSelection = optIndex
+                            pendingChoices[currentIndex] = optIndex
+                        },
                     shape = RoundedCornerShape(12.dp),
                     color = bgColor
                 ) {
@@ -913,7 +1186,10 @@ private fun QuizPlayer(
 
                 if (isText) {
                     val mark = marks[currentIndex]
-                    Surface(shape = RoundedCornerShape(12.dp), color = Terracotta.copy(alpha = 0.35f)) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Terracotta.copy(alpha = 0.35f)
+                    ) {
                         Text(
                             if (mark != null) "Marks: ${mark.score}/10\n${mark.feedback}" else "Marking your answer…",
                             modifier = Modifier.padding(12.dp),
@@ -924,7 +1200,10 @@ private fun QuizPlayer(
                 }
 
                 if (isText && marks[currentIndex]?.failed == true && q.modelAnswer.isNotBlank()) {
-                    Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFF4CAF50).copy(alpha = 0.35f)) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF4CAF50).copy(alpha = 0.35f)
+                    ) {
                         Text(
                             "Model answer:\n${q.modelAnswer}",
                             modifier = Modifier.padding(12.dp),
@@ -935,14 +1214,20 @@ private fun QuizPlayer(
                 }
 
                 Surface(shape = RoundedCornerShape(12.dp), color = Clay.copy(alpha = 0.3f)) {
-                    Text(q.explanation, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        q.explanation,
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Surface(
@@ -952,7 +1237,12 @@ private fun QuizPlayer(
                 shape = RoundedCornerShape(16.dp),
                 color = if (currentIndex > 0) Clay.copy(alpha = 0.6f) else Clay.copy(alpha = 0.2f)
             ) {
-                Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 14.dp)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text("Previous", color = Color.White)
                 }
             }
@@ -960,15 +1250,25 @@ private fun QuizPlayer(
             if (!alreadyConfirmed) {
                 Spacer(modifier = Modifier.width(12.dp))
                 Surface(
-                    modifier = Modifier.weight(1f).clickable {
-                        if (currentIndex < questions.size - 1) onIndexChange(currentIndex + 1)
-                        else onFinishedChange(true)
-                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            if (currentIndex < questions.size - 1) onIndexChange(currentIndex + 1)
+                            else onFinishedChange(true)
+                        },
                     shape = RoundedCornerShape(16.dp),
                     color = Amber.copy(alpha = 0.6f)
                 ) {
-                    Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text(if (currentIndex < questions.size - 1) "Skip" else "Skip & finish", color = Color.White)
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 14.dp)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (currentIndex < questions.size - 1) "Skip" else "Skip & finish",
+                            color = Color.White
+                        )
                     }
                 }
             }
@@ -992,7 +1292,12 @@ private fun QuizPlayer(
                 shape = RoundedCornerShape(16.dp),
                 color = Terracotta.copy(alpha = if (alreadyConfirmed || canConfirm) 0.75f else 0.3f)
             ) {
-                Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 14.dp)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text(
                         when {
                             !alreadyConfirmed -> "Confirm"
@@ -1017,7 +1322,9 @@ private fun QuizReview(
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
@@ -1026,7 +1333,10 @@ private fun QuizReview(
             Text("Review", style = MaterialTheme.typography.titleMedium)
         }
         Column(
-            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
         ) {
             questions.forEachIndexed { i, q ->
                 val attempted = answers.containsKey(i)
@@ -1043,32 +1353,53 @@ private fun QuizReview(
                             else -> Clay.copy(alpha = 0.25f)
                         }
                         Surface(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp),
                             shape = RoundedCornerShape(12.dp),
                             color = color
                         ) { Text(option, modifier = Modifier.padding(12.dp)) }
                     }
                     if (!attempted) {
-                        Text("Not attempted. The correct answer is in green.", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            "Not attempted. The correct answer is in green.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 } else {
                     if (attempted) {
                         Surface(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp),
                             shape = RoundedCornerShape(12.dp),
                             color = Clay.copy(alpha = 0.3f)
-                        ) { Text("Your answer:\n${textAnswers[i] ?: ""}", modifier = Modifier.padding(12.dp)) }
+                        ) {
+                            Text(
+                                "Your answer:\n${textAnswers[i] ?: ""}",
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
                         marks[i]?.let { m ->
                             Surface(
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
                                 shape = RoundedCornerShape(12.dp),
                                 color = Terracotta.copy(alpha = 0.35f)
-                            ) { Text("Marks: ${m.score}/10\n${m.feedback}", modifier = Modifier.padding(12.dp)) }
+                            ) {
+                                Text(
+                                    "Marks: ${m.score}/10\n${m.feedback}",
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
                         }
                     }
                     if (!attempted || marks[i]?.failed == true) {
                         Surface(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp),
                             shape = RoundedCornerShape(12.dp),
                             color = Color(0xFF4CAF50).copy(alpha = 0.35f)
                         ) {
@@ -1082,7 +1413,11 @@ private fun QuizReview(
 
                 if (q.explanation.isNotBlank()) {
                     Surface(shape = RoundedCornerShape(12.dp), color = Clay.copy(alpha = 0.3f)) {
-                        Text(q.explanation, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            q.explanation,
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.height(24.dp))
