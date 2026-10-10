@@ -33,6 +33,9 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
     var showNameDialog by remember { mutableStateOf(userName == null) }
     var showFamiliarityPopup by remember { mutableStateOf(false) }
     var showMasteryPopup by remember { mutableStateOf(false) }
+    var showStudyTip by remember { mutableStateOf(true) }
+    var showSemesterDialog by remember { mutableStateOf(false) }
+    var semesterVersion by remember { mutableStateOf(0) }
 
     val sessions by db.classSessionDao().getAll().collectAsState(initial = emptyList())
     val units by db.unitDao().getAll().collectAsState(initial = emptyList())
@@ -83,6 +86,39 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
         val pending = assignments.filter { !it.completed }
         if (pending.isEmpty()) "No assignments due" else
             pending.take(4).joinToString("\n") { "${it.courseName} — ${it.deadline}" }
+    }
+
+    val studyTipText = remember(sessions, units, semesterVersion) {
+        val start = SemesterPrefs.getStartDate(context)
+        if (start == null) return@remember "Tap to set up your semester dates"
+        val totalWeeks = SemesterPrefs.getTotalWeeks(context)
+        val examWeek = SemesterPrefs.getExamWeek(context)
+        val week = SemesterCalculator.currentWeek(start, totalWeeks)
+        val todayName = LocalDate.now().dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+        val codes = sessions.filter { it.day.equals(todayName, ignoreCase = true) }
+            .map { it.unitCode }.distinct()
+        if (codes.isEmpty()) {
+            val weekLines = units.mapNotNull { unit ->
+                val topics = SemesterCalculator.parseTopics(unit.topics)
+                val thisWeek = SemesterCalculator.topicsForWeek(topics, week, examWeek)
+                if (thisWeek.isEmpty()) null
+                else "${unit.name.ifBlank { unit.code }}: ${thisWeek.joinToString(" and ")}"
+            }
+            return@remember if (weekLines.isEmpty()) {
+                "No classes today. Week $week of $totalWeeks"
+            } else {
+                "No classes today. This week (week $week):\n" + weekLines.joinToString("\n")
+            }
+        }
+        codes.joinToString("\n") { code ->
+            val unit = units.find { it.code == code }
+            val unitName = unit?.name?.takeIf { it.isNotBlank() } ?: code
+            val topics = SemesterCalculator.parseTopics(unit?.topics ?: "")
+            SemesterCalculator.bubbleText(
+                unitName,
+                SemesterCalculator.topicsForWeek(topics, week, examWeek)
+            )
+        }
     }
 
     val familiarityPercent = remember(topicProgress) {
@@ -137,10 +173,31 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Box(
+        Column(
             modifier = Modifier.fillMaxWidth().weight(2.5f),
-            contentAlignment = Alignment.CenterStart
+            verticalArrangement = Arrangement.Center
         ) {
+            if (showStudyTip) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Clay.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
+                        .clickable { showSemesterDialog = true }
+                        .padding(start = 14.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        studyTipText,
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { showStudyTip = false }) {
+                        Text("✕", color = Color.White)
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
             Text("Good to see you, ${userName ?: ""} ", style = MaterialTheme.typography.headlineSmall)
         }
 
@@ -157,6 +214,22 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
                 Bubble("Performance", Color(0xFFD98324), masteryLabel, Modifier.weight(1f), percent = masteryPercent) { showMasteryPopup = true }
             }
         }
+    }
+
+    if (showSemesterDialog) {
+        SemesterSetupDialog(
+            initialStart = SemesterPrefs.getStartDate(context),
+            initialWeeks = SemesterPrefs.getTotalWeeks(context),
+            initialExamWeek = SemesterPrefs.getExamWeek(context),
+            onSave = { start, weeks, exam ->
+                SemesterPrefs.setStartDate(context, start)
+                SemesterPrefs.setTotalWeeks(context, weeks)
+                SemesterPrefs.setExamWeek(context, exam)
+                semesterVersion++
+                showSemesterDialog = false
+            },
+            onDismiss = { showSemesterDialog = false }
+        )
     }
 
     if (showFamiliarityPopup) {
