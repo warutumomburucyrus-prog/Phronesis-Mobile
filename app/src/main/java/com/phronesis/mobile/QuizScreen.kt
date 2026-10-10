@@ -116,6 +116,23 @@ fun QuizScreen() {
     var quizCurrentIndex by remember { mutableStateOf(0) }
     var quizAnswers by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
     var quizTextAnswers by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+
+    var quizMarks by remember { mutableStateOf<Map<Int, MarkResult>>(emptyMap()) }
+    var markingIndexes by remember { mutableStateOf<Set<Int>>(emptySet()) }
+
+    val markTextAnswer: (Int, QuizQuestion, String) -> Unit = { i, q, answer ->
+        markingIndexes = markingIndexes + i
+        coroutineScope.launch {
+            val result = try {
+                parseMarkJson(GeminiHelper.markAnswer(q.type, q.question, q.modelAnswer, answer))
+            } catch (e: Exception) {
+                MarkResult(0, "Couldn't mark this one (${e.message?.take(80)}). Compare with the model answer below.", failed = true)
+            }
+            quizMarks = quizMarks + (i to result)
+            markingIndexes = markingIndexes - i
+        }
+    }
+
     var quizFinished by remember { mutableStateOf(false) }
     var quizTimerTotalSeconds by remember { mutableStateOf<Int?>(null) }
     var quizTimerRemainingSeconds by remember { mutableStateOf<Int?>(null) }
@@ -216,6 +233,9 @@ fun QuizScreen() {
                 onAnswerConfirmed = { qIdx, optIdx -> quizAnswers = quizAnswers + (qIdx to optIdx) },
                 textAnswers = quizTextAnswers,
                 onTextAnswerChange = { i, t -> quizTextAnswers = quizTextAnswers + (i to t) },
+                marks = quizMarks,
+                markingIndexes = markingIndexes,
+                onMarkText = markTextAnswer,
                 finished = quizFinished,
                 onFinishedChange = { quizFinished = it },
                 timerTotalSeconds = quizTimerTotalSeconds,
@@ -490,6 +510,8 @@ fun QuizScreen() {
                 quizCurrentIndex = 0
                 quizAnswers = emptyMap()
                 quizTextAnswers = emptyMap()
+                quizMarks = emptyMap()
+                markingIndexes = emptySet()
                 quizFinished = false
                 quizTimerTotalSeconds = timerMinutes?.times(60)
                 quizTimerRemainingSeconds = timerMinutes?.times(60)
@@ -674,6 +696,9 @@ private fun QuizPlayer(
     onAnswerConfirmed: (Int, Int) -> Unit,
     textAnswers: Map<Int, String>,
     onTextAnswerChange: (Int, String) -> Unit,
+    marks: Map<Int, MarkResult>,
+    markingIndexes: Set<Int>,
+    onMarkText: (Int, QuizQuestion, String) -> Unit,
     finished: Boolean,
     onFinishedChange: (Boolean) -> Unit,
     timerTotalSeconds: Int?,
@@ -699,13 +724,32 @@ private fun QuizPlayer(
     }
 
     if (finished) {
-        val score = answers.count { (qIdx, optIdx) ->
-            val question = questions.getOrNull(qIdx)
-            question != null && question.type == "multiple_choice" && question.correctIndex == optIdx
+
+        if (markingIndexes.isNotEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator()
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Marking your answers…")
+            }
+            return
+        }
+
+        val score = questions.indices.sumOf { i ->
+            val question = questions[i]
+            when {
+                !answers.containsKey(i) -> 0.0
+                question.type == "multiple_choice" ->
+                    if (answers[i] == question.correctIndex) 1.0 else 0.0
+                else -> (marks[i]?.score ?: 0) / 10.0
+            }
         }
         if (!hasSavedResult && unitCode != null && topic != null && db != null && coroutineScope != null) {
             hasSavedResult = true
-            val percentThisAttempt = (score * 100) / questions.size
+            val percentThisAttempt = (score * 100 / questions.size).toInt()
             coroutineScope.launch {
                 val existing = db.topicProgressDao().getOne(unitCode, topic)
                 if (existing != null) {
@@ -724,7 +768,7 @@ private fun QuizPlayer(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("Score: $score / ${questions.size}", style = MaterialTheme.typography.headlineSmall)
+            Text("Score: %.1f / %d".format(score, questions.size), style = MaterialTheme.typography.headlineSmall)
         }
         return
     }
@@ -763,11 +807,15 @@ private fun QuizPlayer(
                     value = textAnswers[currentIndex] ?: "",
                     onValueChange = { onTextAnswerChange(currentIndex, it) },
                     enabled = !alreadyConfirmed,
-                    label = { Text(if (q.type == "coding") "Write your code" else "Your answer") },
+                    label = { Text(when (q.type) {
+                        "coding" -> "Write your code"
+                        "math" -> "Show your working, then your final answer"
+                        else -> "Your answer"
+                    }) },
                     textStyle = if (q.type == "coding")
                         MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
                     else MaterialTheme.typography.bodyMedium,
-                    minLines = if (q.type == "coding") 8 else 3,
+                    minLines = when (q.type) { "coding" -> 8; "math" -> 6; else -> 3 },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
                 )
             }
@@ -795,7 +843,19 @@ private fun QuizPlayer(
             if (alreadyConfirmed) {
                 Spacer(modifier = Modifier.height(8.dp))
 
-                if (isText && q.modelAnswer.isNotBlank()) {
+                if (isText) {
+                    val mark = marks[currentIndex]
+                    Surface(shape = RoundedCornerShape(12.dp), color = Terracotta.copy(alpha = 0.35f)) {
+                        Text(
+                            if (mark != null) "Marks: ${mark.score}/10\n${mark.feedback}" else "Marking your answer…",
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                if (isText && marks[currentIndex]?.failed == true && q.modelAnswer.isNotBlank()) {
                     Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFF4CAF50).copy(alpha = 0.35f)) {
                         Text(
                             "Model answer:\n${q.modelAnswer}",
@@ -835,6 +895,9 @@ private fun QuizPlayer(
                     .clickable(enabled = alreadyConfirmed || canConfirm) {
                         if (!alreadyConfirmed) {
                             onAnswerConfirmed(currentIndex, if (isText) -1 else pendingSelection!!)
+
+                            if (isText) onMarkText(currentIndex, q, textAnswers[currentIndex] ?: "")
+
                         } else if (currentIndex < questions.size - 1) {
                             onIndexChange(currentIndex + 1)
                         } else {

@@ -19,6 +19,8 @@ data class ClassSessionData(
     val venue: String
 )
 
+data class MarkResult(val score: Int, val feedback: String, val failed: Boolean = false)
+
 fun parseQuizJson(raw: String): List<QuizQuestion> {
     val cleaned = raw.trim()
         .removePrefix("```json").removePrefix("```")
@@ -27,6 +29,8 @@ fun parseQuizJson(raw: String): List<QuizQuestion> {
     return (0 until arr.length()).map { i ->
         val obj = arr.getJSONObject(i)
         val optsArr = obj.optJSONArray("options")
+
+
         QuizQuestion(
             question = obj.getString("question"),
             options = if (optsArr == null) emptyList()
@@ -70,4 +74,13 @@ fun parseUnitTopicsJson(raw: String): List<String> {
     val obj = org.json.JSONObject(cleaned)
     val arr = obj.getJSONArray("topics")
     return (0 until arr.length()).map { arr.getString(it) }
+}
+
+fun parseMarkJson(raw: String): MarkResult {
+    val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+    val obj = org.json.JSONObject(cleaned)
+    return MarkResult(
+        score = obj.getInt("score").coerceIn(0, 10),
+        feedback = obj.optString("feedback", "")
+    )
 }
