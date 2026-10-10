@@ -46,12 +46,32 @@ object GeminiHelper {
 
     private fun readPdfBytes(filePath: String): ByteArray = File(filePath).readBytes()
 
-    private val jsonInstruction = """
-        Output ONLY valid JSON, no markdown, no code fences, no extra text, in exactly this shape:
-        [{"question":"...", "options":["...","...","...","..."], "correctIndex":0, "explanation":"..."}]
-        correctIndex is the 0-based index of the correct option. The explanation should say why the
-        correct answer is right and briefly why the others are wrong.
-    """.trimIndent()
+    private fun quizInstruction(types: List<String>): String {
+        val shapes = mutableListOf<String>()
+        if ("multiple_choice" in types) shapes.add(
+            """{"type":"multiple_choice","question":"...","options":["...","...","...","..."],"correctIndex":0,"explanation":"..."}"""
+        )
+        if ("short_answer" in types) shapes.add(
+            """{"type":"short_answer","question":"...","modelAnswer":"...","explanation":"..."}"""
+        )
+        if ("math" in types) shapes.add(
+            """{"type":"math","question":"...","modelAnswer":"final answer with the key steps","explanation":"..."}"""
+        )
+        if ("coding" in types) shapes.add(
+            """{"type":"coding","question":"...","modelAnswer":"a correct solution written as code","explanation":"..."}"""
+        )
+        return """
+            Output ONLY valid JSON, no markdown, no code fences, no extra text: an array where every
+            item has exactly one of these shapes:
+        """.trimIndent() + "\n" + shapes.joinToString("\n") + "\n" + """
+            Rules:
+            - Use only the shapes listed above and mix them fairly evenly.
+            - For multiple_choice, correctIndex is the 0-based index of the correct option, and the explanation says why it is right and briefly why the others are wrong.
+            - For the other types, modelAnswer is the full correct answer and the explanation shows how to reach it.
+            - Write maths in plain text (for example x^2, sqrt(x), 3/4), never LaTeX.
+            - Coding questions must be small enough to answer in under 15 lines. Use Python unless the topic clearly needs another language.
+        """.trimIndent()
+    }
 
     suspend fun summarizeNotesPdf(filePath: String, focus: String = ""): String = withTokenRetry {
         val bytes = readPdfBytes(filePath)
@@ -63,19 +83,29 @@ object GeminiHelper {
         model.generateContent(prompt).text ?: "No summary generated."
     }
 
-    suspend fun generateQuizFromPdf(filePath: String, questionCount: Int, focus: String = ""): String = withTokenRetry {
+    suspend fun generateQuizFromPdf(
+        filePath: String,
+        questionCount: Int,
+        focus: String = "",
+        types: List<String> =listOf("multiple_choice", "short_answer", "math", "coding")
+    ): String = withTokenRetry {
         val bytes = readPdfBytes(filePath)
         val focusLine = if (focus.isNotBlank()) " Focus specifically on: $focus." else ""
         val prompt = content {
             inlineData(bytes, "application/pdf")
-            text("Based on this document, generate exactly $questionCount multiple-choice quiz questions.$focusLine\n$jsonInstruction")
+            text("Based on this document, generate exactly $questionCount quiz questions.$focusLine\n${quizInstruction(types)}")
         }
         model.generateContent(prompt).text ?: "[]"
     }
 
-    suspend fun generateQuizFromText(sourceText: String, questionCount: Int, focus: String = ""): String = withTokenRetry {
+    suspend fun generateQuizFromText(
+        sourceText: String,
+        questionCount: Int,
+        focus: String = "",
+        types: List<String> = listOf("multiple_choice", "short_answer", "math", "coding")
+    ): String = withTokenRetry {
         val focusLine = if (focus.isNotBlank()) " Focus specifically on: $focus." else ""
-        val prompt = "Based on the topic \"$sourceText\", generate exactly $questionCount multiple-choice quiz questions.$focusLine\n$jsonInstruction"
+        val prompt = "Based on the topic \"$sourceText\", generate exactly $questionCount quiz questions.$focusLine\n${quizInstruction(types)}"
         model.generateContent(prompt).text ?: "[]"
     }
 

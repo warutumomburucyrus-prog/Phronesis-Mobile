@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.runtime.LaunchedEffect
 import com.phronesis.mobile.BuildConfig
+import androidx.compose.ui.text.font.FontFamily
 
 private val sampleUnitNames = listOf("Calculus II (MATH201)", "Data Structures (CS301)", "Physics I (PHY110)")
 
@@ -113,7 +114,8 @@ fun QuizScreen() {
     var isGenerating by remember { mutableStateOf(false) }
     var generatedQuiz by remember { mutableStateOf<List<QuizQuestion>?>(null) }
     var quizCurrentIndex by remember { mutableStateOf(0) }
-    var quizAnswers by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) } // question index -> confirmed option index
+    var quizAnswers by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
+    var quizTextAnswers by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     var quizFinished by remember { mutableStateOf(false) }
     var quizTimerTotalSeconds by remember { mutableStateOf<Int?>(null) }
     var quizTimerRemainingSeconds by remember { mutableStateOf<Int?>(null) }
@@ -212,6 +214,8 @@ fun QuizScreen() {
                 onIndexChange = { quizCurrentIndex = it },
                 answers = quizAnswers,
                 onAnswerConfirmed = { qIdx, optIdx -> quizAnswers = quizAnswers + (qIdx to optIdx) },
+                textAnswers = quizTextAnswers,
+                onTextAnswerChange = { i, t -> quizTextAnswers = quizTextAnswers + (i to t) },
                 finished = quizFinished,
                 onFinishedChange = { quizFinished = it },
                 timerTotalSeconds = quizTimerTotalSeconds,
@@ -477,6 +481,7 @@ fun QuizScreen() {
             hasSelectedNote = selectedNote != null,
             units = units,
             onDismiss = { showGenerateDialog = false },
+
             onGenerate = { questionCount, unitCode, topic, timerMinutes ->
                 try{
                 showGenerateDialog = false
@@ -484,6 +489,7 @@ fun QuizScreen() {
                 quizError = null
                 quizCurrentIndex = 0
                 quizAnswers = emptyMap()
+                quizTextAnswers = emptyMap()
                 quizFinished = false
                 quizTimerTotalSeconds = timerMinutes?.times(60)
                 quizTimerRemainingSeconds = timerMinutes?.times(60)
@@ -666,6 +672,8 @@ private fun QuizPlayer(
     onIndexChange: (Int) -> Unit,
     answers: Map<Int, Int>,
     onAnswerConfirmed: (Int, Int) -> Unit,
+    textAnswers: Map<Int, String>,
+    onTextAnswerChange: (Int, String) -> Unit,
     finished: Boolean,
     onFinishedChange: (Boolean) -> Unit,
     timerTotalSeconds: Int?,
@@ -691,7 +699,10 @@ private fun QuizPlayer(
     }
 
     if (finished) {
-        val score = answers.count { (qIdx, optIdx) -> questions.getOrNull(qIdx)?.correctIndex == optIdx }
+        val score = answers.count { (qIdx, optIdx) ->
+            val question = questions.getOrNull(qIdx)
+            question != null && question.type == "multiple_choice" && question.correctIndex == optIdx
+        }
         if (!hasSavedResult && unitCode != null && topic != null && db != null && coroutineScope != null) {
             hasSavedResult = true
             val percentThisAttempt = (score * 100) / questions.size
@@ -721,6 +732,8 @@ private fun QuizPlayer(
     val q = questions[currentIndex]
     val alreadyConfirmed = answers.containsKey(currentIndex)
     var pendingSelection by remember(currentIndex) { mutableStateOf(answers[currentIndex]) }
+    val isText = q.type != "multiple_choice"
+    val canConfirm = if (isText) !textAnswers[currentIndex].isNullOrBlank() else pendingSelection != null
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (timerRemainingSeconds != null) {
@@ -745,6 +758,20 @@ private fun QuizPlayer(
             Text(q.question, style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(16.dp))
 
+            if (isText) {
+                OutlinedTextField(
+                    value = textAnswers[currentIndex] ?: "",
+                    onValueChange = { onTextAnswerChange(currentIndex, it) },
+                    enabled = !alreadyConfirmed,
+                    label = { Text(if (q.type == "coding") "Write your code" else "Your answer") },
+                    textStyle = if (q.type == "coding")
+                        MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+                    else MaterialTheme.typography.bodyMedium,
+                    minLines = if (q.type == "coding") 8 else 3,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                )
+            }
+
             q.options.forEachIndexed { optIndex, option ->
                 val isCorrectOption = optIndex == q.correctIndex
                 val isPicked = pendingSelection == optIndex
@@ -767,6 +794,18 @@ private fun QuizPlayer(
 
             if (alreadyConfirmed) {
                 Spacer(modifier = Modifier.height(8.dp))
+
+                if (isText && q.modelAnswer.isNotBlank()) {
+                    Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFF4CAF50).copy(alpha = 0.35f)) {
+                        Text(
+                            "Model answer:\n${q.modelAnswer}",
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
                 Surface(shape = RoundedCornerShape(12.dp), color = Clay.copy(alpha = 0.3f)) {
                     Text(q.explanation, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
                 }
@@ -793,9 +832,9 @@ private fun QuizPlayer(
             Surface(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable(enabled = alreadyConfirmed || pendingSelection != null) {
+                    .clickable(enabled = alreadyConfirmed || canConfirm) {
                         if (!alreadyConfirmed) {
-                            onAnswerConfirmed(currentIndex, pendingSelection!!)
+                            onAnswerConfirmed(currentIndex, if (isText) -1 else pendingSelection!!)
                         } else if (currentIndex < questions.size - 1) {
                             onIndexChange(currentIndex + 1)
                         } else {
@@ -803,7 +842,7 @@ private fun QuizPlayer(
                         }
                     },
                 shape = RoundedCornerShape(16.dp),
-                color = Terracotta.copy(alpha = if (alreadyConfirmed || pendingSelection != null) 0.75f else 0.3f)
+                color = Terracotta.copy(alpha = if (alreadyConfirmed || canConfirm) 0.75f else 0.3f)
             ) {
                 Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text(

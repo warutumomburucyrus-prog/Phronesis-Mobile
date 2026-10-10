@@ -6,7 +6,9 @@ data class QuizQuestion(
     val question: String,
     val options: List<String>,
     val correctIndex: Int,
-    val explanation: String
+    val explanation: String,
+    val type: String = "multiple_choice",
+    val modelAnswer: String = ""
 )
 
 data class ClassSessionData(
@@ -24,12 +26,15 @@ fun parseQuizJson(raw: String): List<QuizQuestion> {
     val arr = JSONArray(cleaned)
     return (0 until arr.length()).map { i ->
         val obj = arr.getJSONObject(i)
-        val optsArr = obj.getJSONArray("options")
+        val optsArr = obj.optJSONArray("options")
         QuizQuestion(
             question = obj.getString("question"),
-            options = (0 until optsArr.length()).map { optsArr.getString(it) },
-            correctIndex = obj.getInt("correctIndex"),
-            explanation = obj.getString("explanation")
+            options = if (optsArr == null) emptyList()
+            else (0 until optsArr.length()).map { optsArr.getString(it) },
+            correctIndex = obj.optInt("correctIndex", -1),
+            explanation = obj.optString("explanation", ""),
+            type = obj.optString("type", "multiple_choice"),
+            modelAnswer = obj.optString("modelAnswer", "")
         )
     }
 }
