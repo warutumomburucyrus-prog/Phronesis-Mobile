@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.runtime.LaunchedEffect
 import com.phronesis.mobile.BuildConfig
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.draw.clip
 
 private val sampleUnitNames = listOf("Calculus II (MATH201)", "Data Structures (CS301)", "Physics I (PHY110)")
 
@@ -818,7 +819,7 @@ private fun QuizPlayer(
 
     val q = questions[currentIndex]
     val alreadyConfirmed = answers.containsKey(currentIndex)
-    var pendingSelection by remember(currentIndex) { mutableStateOf(answers[currentIndex]) }
+    var pendingSelection by remember(currentIndex) { mutableStateOf(answers[currentIndex] ?: pendingChoices[currentIndex]) }
     val isText = q.type != "multiple_choice"
     val canConfirm = if (isText) !textAnswers[currentIndex].isNullOrBlank() else pendingSelection != null
 
@@ -832,6 +833,29 @@ private fun QuizPlayer(
                 style = MaterialTheme.typography.labelLarge,
                 color = if (timerRemainingSeconds < 30) MaterialTheme.colorScheme.error else Color.Unspecified
             )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            questions.forEachIndexed { i, item ->
+                val color = when {
+                    answers.containsKey(i) -> Color(0xFF4CAF50)
+                    (item.type == "multiple_choice" && pendingChoices[i] != null) ||
+                            (item.type != "multiple_choice" && !textAnswers[i].isNullOrBlank()) -> Color(0xFFFF9800)
+                    else -> Color(0xFFE57373)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(if (i == currentIndex) 10.dp else 6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(color)
+                        .clickable { onIndexChange(i) }
+                )
+            }
         }
 
         Column(
@@ -932,6 +956,23 @@ private fun QuizPlayer(
                     Text("Previous", color = Color.White)
                 }
             }
+
+            if (!alreadyConfirmed) {
+                Spacer(modifier = Modifier.width(12.dp))
+                Surface(
+                    modifier = Modifier.weight(1f).clickable {
+                        if (currentIndex < questions.size - 1) onIndexChange(currentIndex + 1)
+                        else onFinishedChange(true)
+                    },
+                    shape = RoundedCornerShape(16.dp),
+                    color = Amber.copy(alpha = 0.6f)
+                ) {
+                    Box(modifier = Modifier.padding(vertical = 14.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text(if (currentIndex < questions.size - 1) "Skip" else "Skip & finish", color = Color.White)
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.width(12.dp))
             Surface(
                 modifier = Modifier
