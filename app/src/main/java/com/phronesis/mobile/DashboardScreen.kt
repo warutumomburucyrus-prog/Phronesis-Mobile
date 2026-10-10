@@ -88,41 +88,66 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
             pending.take(4).joinToString("\n") { "${it.courseName} — ${it.deadline}" }
     }
 
-    val studyTipText = remember(sessions, units, semesterVersion) {
+    val studyTipText = remember(sessions, units, topicProgress, semesterVersion) {
         val start = SemesterPrefs.getStartDate(context)
         if (start == null) return@remember "Tap to set up your semester dates"
         val totalWeeks = SemesterPrefs.getTotalWeeks(context)
         val examWeek = SemesterPrefs.getExamWeek(context)
         val week = SemesterCalculator.currentWeek(start, totalWeeks)
+
+        val studied = topicProgress
+            .filter { it.familiarity > 0 || it.quizzesTaken > 0 }
+            .map { it.unitCode to it.topic.trim().lowercase() }
+            .toSet()
+
+        fun topicsToStudy(unit: UnitEntity): List<String> =
+            SemesterCalculator
+                .topicsForWeek(SemesterCalculator.parseTopics(unit.topics), week, examWeek)
+                .filterNot { (unit.code to it.trim().lowercase()) in studied }
+
         val todayName = LocalDate.now().dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
         val codes = sessions.filter { it.day.equals(todayName, ignoreCase = true) }
             .map { it.unitCode }.distinct()
+
         if (codes.isEmpty()) {
             val weekLines = units.mapNotNull { unit ->
-                val topics = SemesterCalculator.parseTopics(unit.topics)
-                val thisWeek = SemesterCalculator.topicsForWeek(topics, week, examWeek)
-                if (thisWeek.isEmpty()) null
-                else "${unit.name.ifBlank { unit.code }}: ${thisWeek.joinToString(" and ")}"
+                val left = topicsToStudy(unit)
+                if (left.isEmpty()) null
+                else "${unit.name.ifBlank { unit.code }}: ${left.joinToString(", ")}"
             }
             return@remember if (weekLines.isEmpty()) {
-                "No classes today. Week $week of $totalWeeks"
+                "Week $week: you're all caught up on this week's topics"
             } else {
-                "No classes today. This week (week $week):\n" + weekLines.joinToString("\n")
+                "Week $week: you should have studied these topics this week:\n" +
+                        weekLines.joinToString("\n")
             }
         }
+
         codes.joinToString("\n") { code ->
             val unit = units.find { it.code == code }
             val unitName = unit?.name?.takeIf { it.isNotBlank() } ?: code
-            val topics = SemesterCalculator.parseTopics(unit?.topics ?: "")
-            SemesterCalculator.bubbleText(
-                unitName,
-                SemesterCalculator.topicsForWeek(topics, week, examWeek)
-            )
+            SemesterCalculator.bubbleText(unitName, unit?.let { topicsToStudy(it) } ?: emptyList())
         }
     }
 
-    val familiarityPercent = remember(topicProgress) {
-        if (topicProgress.isEmpty()) null else Math.round(topicProgress.map { it.familiarity }.average()).toInt()
+    val familiarityByUnitList = remember(units, topicProgress) {
+        units.mapNotNull { unit ->
+            val allTopics = SemesterCalculator.parseTopics(unit.topics)
+                .map { it.lowercase() }.toSet()
+            if (allTopics.isEmpty()) return@mapNotNull null
+            val touched = topicProgress
+                .filter { it.unitCode == unit.code && (it.familiarity > 0 || it.quizzesTaken > 0) }
+                .map { it.topic.trim().lowercase() }
+                .toSet()
+                .count { it in allTopics }
+            val label = if (unit.name.isNotBlank()) "${unit.code} — ${unit.name}" else unit.code
+            label to (touched * 100.0 / allTopics.size)
+        }
+    }
+
+    val familiarityPercent = remember(familiarityByUnitList) {
+        if (familiarityByUnitList.isEmpty()) null
+        else Math.ceil(familiarityByUnitList.map { it.second }.average()).toInt()
     }
     val familiarityLabel = if (units.isEmpty()) "No units yet" else "across ${units.size} unit${if (units.size == 1) "" else "s"}"
 
@@ -173,32 +198,42 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Column(
-            modifier = Modifier.fillMaxWidth().weight(2.5f),
-            verticalArrangement = Arrangement.Center
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxWidth().weight(2.5f)
         ) {
+            val bubbleHeight = (maxHeight / 2 - 28.dp).coerceAtLeast(60.dp)
+
+            Text(
+                "Good to see you, ${userName ?: ""} ",
+                modifier = Modifier.align(Alignment.CenterStart),
+                style = MaterialTheme.typography.headlineSmall
+            )
+
             if (showStudyTip) {
                 Row(
                     modifier = Modifier
+                        .align(Alignment.TopCenter)
                         .fillMaxWidth()
+                        .height(bubbleHeight)
                         .background(Clay.copy(alpha = 0.75f), RoundedCornerShape(16.dp))
                         .clickable { showSemesterDialog = true }
                         .padding(start = 14.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        studyTipText,
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            studyTipText,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                     TextButton(onClick = { showStudyTip = false }) {
                         Text("✕", color = Color.White)
                     }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
             }
-            Text("Good to see you, ${userName ?: ""} ", style = MaterialTheme.typography.headlineSmall)
         }
 
         Column(
@@ -233,18 +268,10 @@ fun DashboardScreen(onBubbleClick: (String) -> Unit) {
     }
 
     if (showFamiliarityPopup) {
-        val familiarityByUnit = topicProgress
-            .groupBy { it.unitCode }
-            .map { (unitCode, entries) ->
-                val unit = units.find { it.code == unitCode }
-                val label = if (unit != null && unit.name.isNotBlank()) "$unitCode — ${unit.name}" else unitCode
-                val avg = Math.round(entries.map { it.familiarity }.average()).toInt()
-                label to avg
-            }
         ProgressPopup(
             title = "Familiarity by unit",
             ringColor = Clay,
-            items = familiarityByUnit,
+            items = familiarityByUnitList.map { it.first to Math.ceil(it.second).toInt() },
             onDismiss = { showFamiliarityPopup = false }
         )
     }
