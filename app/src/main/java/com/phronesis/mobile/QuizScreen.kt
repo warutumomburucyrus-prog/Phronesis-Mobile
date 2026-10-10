@@ -502,7 +502,7 @@ fun QuizScreen() {
             units = units,
             onDismiss = { showGenerateDialog = false },
 
-            onGenerate = { questionCount, unitCode, topic, timerMinutes ->
+            onGenerate = { questionCount, unitCode, topic, timed ->
                 try{
                 showGenerateDialog = false
                 isGenerating = true
@@ -513,8 +513,8 @@ fun QuizScreen() {
                 quizMarks = emptyMap()
                 markingIndexes = emptySet()
                 quizFinished = false
-                quizTimerTotalSeconds = timerMinutes?.times(60)
-                quizTimerRemainingSeconds = timerMinutes?.times(60)
+                quizTimerTotalSeconds = null
+                quizTimerRemainingSeconds = null
                 val unitName = units.find { it.code == unitCode }?.name
                 quizUnitCode = unitCode
                 quizTopic = topic
@@ -527,7 +527,15 @@ fun QuizScreen() {
                         } else {
                             GeminiHelper.generateQuizFromText(unitName ?: "General study material", questionCount, topicOrFocus)
                         }
-                        generatedQuiz = parseQuizJson(rawJson)
+
+                        val parsed = parseQuizJson(rawJson)
+                        generatedQuiz = parsed
+                        if (timed) {
+                            val seconds = (parsed.sumOf { it.minutes } * 60 * 0.75).toInt().coerceAtLeast(60)
+                            quizTimerTotalSeconds = seconds
+                            quizTimerRemainingSeconds = seconds
+                        }
+
                         showQuizView = true
                         if (unitCode != null && topic != null) {
                             val existing = db.topicProgressDao().getOne(unitCode, topic)
@@ -578,14 +586,13 @@ private fun GenerateQuizDialog(
     hasSelectedNote: Boolean,
     units: List<UnitEntity>,
     onDismiss: () -> Unit,
-    onGenerate: (questionCount: Int, unitCode: String?, topic: String?, timerMinutes: Int?) -> Unit
+    onGenerate: (questionCount: Int, unitCode: String?, topic: String?, timed: Boolean) -> Unit
 ) {
-    var questionCount by remember { mutableStateOf(5) }
+    val context = LocalContext.current
+    var questionCount by remember { mutableStateOf(QuizPrefs.getQuestionCount(context)) }
     var selectedUnit by remember { mutableStateOf<UnitEntity?>(null) }
     var selectedTopic by remember { mutableStateOf<String?>(null) }
     var timerEnabled by remember { mutableStateOf(false) }
-    var timerMinutes by remember { mutableStateOf(10) }
-    val context = LocalContext.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -608,11 +615,7 @@ private fun GenerateQuizDialog(
                     Text("Timed quiz")
                 }
                 if (timerEnabled) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Minutes: $timerMinutes")
-                        StepperButton("−") { if (timerMinutes > 1) timerMinutes-- }
-                        StepperButton("+") { if (timerMinutes < 120) timerMinutes++ }
-                    }
+                    Text("The time is set by the questions Gemini writes.", style = MaterialTheme.typography.bodySmall)
                 }
 
                 if (!hasSelectedNote) {
@@ -661,7 +664,8 @@ private fun GenerateQuizDialog(
             TextButton(
                 onClick = {
                     try {
-                        onGenerate(questionCount, selectedUnit?.code, selectedTopic, if (timerEnabled) timerMinutes else null)
+                        QuizPrefs.setQuestionCount(context, questionCount)
+                        onGenerate(questionCount, selectedUnit?.code, selectedTopic, timerEnabled)
                     } catch (e: Throwable) {
                         android.widget.Toast.makeText(context, "Dialog crash: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
                     }
@@ -711,6 +715,29 @@ private fun QuizPlayer(
 ) {
     var hasSavedResult by remember { mutableStateOf(false) }
 
+    var reviewing by remember { mutableStateOf(false) }
+    var autoSubmitDone by remember { mutableStateOf(false) }
+    val pendingChoices = remember { mutableStateMapOf<Int, Int>() }
+
+    LaunchedEffect(finished) {
+        if (finished && !autoSubmitDone) {
+            questions.forEachIndexed { i, q ->
+                if (!answers.containsKey(i)) {
+                    if (q.type == "multiple_choice") {
+                        pendingChoices[i]?.let { onAnswerConfirmed(i, it) }
+                    } else {
+                        val typed = textAnswers[i]
+                        if (!typed.isNullOrBlank()) {
+                            onAnswerConfirmed(i, -1)
+                            onMarkText(i, q, typed)
+                        }
+                    }
+                }
+            }
+            autoSubmitDone = true
+        }
+    }
+
     LaunchedEffect(timerTotalSeconds, finished) {
         if (timerTotalSeconds != null && !finished) {
             var remaining = timerRemainingSeconds ?: timerTotalSeconds
@@ -725,7 +752,7 @@ private fun QuizPlayer(
 
     if (finished) {
 
-        if (markingIndexes.isNotEmpty()) {
+        if (!autoSubmitDone || markingIndexes.isNotEmpty()) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -763,12 +790,28 @@ private fun QuizPlayer(
                 }
             }
         }
+        if (reviewing) {
+            QuizReview(questions, answers, textAnswers, marks, onBack = { reviewing = false })
+            return
+        }
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             Text("Score: %.1f / %d".format(score, questions.size), style = MaterialTheme.typography.headlineSmall)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Attempted ${answers.size} of ${questions.size}", style = MaterialTheme.typography.bodyMedium)
+            Spacer(modifier = Modifier.height(20.dp))
+            Surface(
+                modifier = Modifier.clickable { reviewing = true },
+                shape = RoundedCornerShape(16.dp),
+                color = Terracotta.copy(alpha = 0.75f)
+            ) {
+                Box(modifier = Modifier.padding(horizontal = 28.dp, vertical = 14.dp)) {
+                    Text("Review answers", color = Color.White)
+                }
+            }
         }
         return
     }
@@ -832,6 +875,7 @@ private fun QuizPlayer(
                 Surface(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable(enabled = !alreadyConfirmed) {
                         pendingSelection = optIndex
+                        pendingChoices[currentIndex] = optIndex
                     },
                     shape = RoundedCornerShape(12.dp),
                     color = bgColor
@@ -917,6 +961,90 @@ private fun QuizPlayer(
                         color = Color.White
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuizReview(
+    questions: List<QuizQuestion>,
+    answers: Map<Int, Int>,
+    textAnswers: Map<Int, String>,
+    marks: Map<Int, MarkResult>,
+    onBack: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Outlined.ArrowBack, contentDescription = "Back to results")
+            }
+            Text("Review", style = MaterialTheme.typography.titleMedium)
+        }
+        Column(
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
+        ) {
+            questions.forEachIndexed { i, q ->
+                val attempted = answers.containsKey(i)
+                Text("Question ${i + 1}", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(q.question, style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (q.type == "multiple_choice") {
+                    q.options.forEachIndexed { oi, option ->
+                        val color = when {
+                            oi == q.correctIndex -> Color(0xFF4CAF50).copy(alpha = 0.7f)
+                            attempted && answers[i] == oi -> Color(0xFFE57373).copy(alpha = 0.7f)
+                            else -> Clay.copy(alpha = 0.25f)
+                        }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = color
+                        ) { Text(option, modifier = Modifier.padding(12.dp)) }
+                    }
+                    if (!attempted) {
+                        Text("Not attempted. The correct answer is in green.", style = MaterialTheme.typography.bodySmall)
+                    }
+                } else {
+                    if (attempted) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = Clay.copy(alpha = 0.3f)
+                        ) { Text("Your answer:\n${textAnswers[i] ?: ""}", modifier = Modifier.padding(12.dp)) }
+                        marks[i]?.let { m ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = Terracotta.copy(alpha = 0.35f)
+                            ) { Text("Marks: ${m.score}/10\n${m.feedback}", modifier = Modifier.padding(12.dp)) }
+                        }
+                    }
+                    if (!attempted || marks[i]?.failed == true) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF4CAF50).copy(alpha = 0.35f)
+                        ) {
+                            Text(
+                                (if (attempted) "Model answer:\n" else "Not attempted. Correct answer:\n") + q.modelAnswer,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (q.explanation.isNotBlank()) {
+                    Surface(shape = RoundedCornerShape(12.dp), color = Clay.copy(alpha = 0.3f)) {
+                        Text(q.explanation, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }

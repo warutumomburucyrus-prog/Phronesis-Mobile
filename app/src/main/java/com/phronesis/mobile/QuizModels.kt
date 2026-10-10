@@ -8,7 +8,8 @@ data class QuizQuestion(
     val correctIndex: Int,
     val explanation: String,
     val type: String = "multiple_choice",
-    val modelAnswer: String = ""
+    val modelAnswer: String = "",
+    val minutes: Int = 1
 )
 
 data class ClassSessionData(
@@ -38,7 +39,8 @@ fun parseQuizJson(raw: String): List<QuizQuestion> {
             correctIndex = obj.optInt("correctIndex", -1),
             explanation = obj.optString("explanation", ""),
             type = obj.optString("type", "multiple_choice"),
-            modelAnswer = obj.optString("modelAnswer", "")
+            modelAnswer = obj.optString("modelAnswer", ""),
+            minutes = obj.optInt("minutes", 1).coerceAtLeast(1)
         )
     }
 }

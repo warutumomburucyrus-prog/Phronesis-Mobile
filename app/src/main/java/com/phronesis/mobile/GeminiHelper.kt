@@ -62,7 +62,7 @@ object GeminiHelper {
         )
         return """
             Output ONLY valid JSON, no markdown, no code fences, no extra text: an array where every
-            item has exactly one of these shapes:
+            item has one of these shapes, plus a "minutes" field:
         """.trimIndent() + "\n" + shapes.joinToString("\n") + "\n" + """
             Rules:
             - Maths questions must need at least two or three steps of working, and the question must say "show your working". The modelAnswer must include those steps.
@@ -71,6 +71,7 @@ object GeminiHelper {
             - For the other types, modelAnswer is the full correct answer and the explanation shows how to reach it.
             - Write maths in plain text (for example x^2, sqrt(x), 3/4), never LaTeX.
             - Coding questions must be small enough to answer in under 15 lines. Use Python unless the topic clearly needs another language.
+            - "minutes" is a whole number: the minutes a student realistically needs for that question (about 1 for multiple choice, 2 to 3 for short answer, 4 to 6 for maths, 5 to 8 for coding).
         """.trimIndent()
     }
 
